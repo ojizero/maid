@@ -299,6 +299,7 @@ pub fn check_ignored(path: &Path) -> Result<(), String> {
 /// ignored is a change. An ignored entry must be inside a build folder or be
 /// a `.DS_Store` file.
 pub fn check_status_entries<'a>(entries: impl IntoIterator<Item = &'a str>) -> Result<(), String> {
+    let mut bad = Vec::new();
     for entry in entries {
         if entry.is_empty() {
             continue;
@@ -313,10 +314,21 @@ pub fn check_status_entries<'a>(entries: impl IntoIterator<Item = &'a str>) -> R
         let in_build_dir =
             parents.iter().any(|p| BUILD_DIRS.contains(p)) || (is_dir && BUILD_DIRS.contains(last));
         if !(in_build_dir || (!is_dir && *last == ".DS_Store")) {
-            return Err(format!("ignored file is not build output: {file}"));
+            bad.push(file);
         }
     }
-    Ok(())
+    match bad.as_slice() {
+        [] => Ok(()),
+        [file] => Err(format!("ignored file is not build output: {file}")),
+        [a, b, c, rest @ ..] if !rest.is_empty() => Err(format!(
+            "ignored files are not build output: {a}, {b}, {c} and {} more",
+            rest.len()
+        )),
+        files => Err(format!(
+            "ignored files are not build output: {}",
+            files.join(", ")
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -466,6 +478,14 @@ mod tests {
     #[test]
     fn ignored_data_fails() {
         let fail = |out: &str| check_status_entries(out.lines()).unwrap_err();
+        assert_eq!(
+            fail("!! .env\n!! tmp/"),
+            "ignored files are not build output: .env, tmp/"
+        );
+        assert_eq!(
+            fail("!! a\n!! b\n!! node_modules/\n!! c\n!! d\n!! e"),
+            "ignored files are not build output: a, b, c and 2 more"
+        );
         assert_eq!(
             fail("!! node_modules/\n!! .env"),
             "ignored file is not build output: .env"
