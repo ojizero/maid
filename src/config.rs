@@ -189,6 +189,12 @@ fn validate(config: &Config) -> Result<()> {
         w.default.clean.as_deref(),
         w.default.why.as_deref(),
     )?;
+    for rule in std::iter::once(&w.default).chain(&w.overrides) {
+        for t in [&rule.clean, &rule.dry_run].into_iter().flatten() {
+            crate::worktree::check_template(t)
+                .with_context(|| format!("worktree rule {:?}", rule.name))?;
+        }
+    }
     for o in &w.overrides {
         let what = format!("worktree override {:?}", o.name);
         check_action(&what, o.action, o.clean.as_deref(), o.why.as_deref())?;
@@ -322,6 +328,7 @@ mod tests {
         assert!(err("[worktrees]\ndelete_branch='always'").contains("unknown variant `always`"));
         assert!(err("[worktrees]\nclean=''").contains("needs a clean command"));
         assert!(err("[worktrees]\nrepo=['~']").contains("unknown field `repo`"));
+        assert!(err("[worktrees]\nclean='rm -rf \"{path}\"'").contains("inside quotes"));
         assert!(
             err("[[worktrees.override]]\nname='x'\npath='rel/*'\naction='keep'\nwhy='y'")
                 .contains("must start with")

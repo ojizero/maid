@@ -164,10 +164,14 @@ pub fn rule_for<'a>(
     path: &str,
     home: &Path,
 ) -> (&'a Rule, Vec<(String, String)>) {
+    // wt prints real paths, so also try HOME with its links resolved.
+    let real_home = std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
     for rule in &config.overrides {
-        let pattern = crate::sys::expand(&rule.path, home);
-        if let Some(captures) = matches(&pattern.to_string_lossy(), path) {
-            return (rule, captures);
+        for home in [home, real_home.as_path()] {
+            let pattern = crate::sys::expand(&rule.path, home);
+            if let Some(captures) = matches(&pattern.to_string_lossy(), path) {
+                return (rule, captures);
+            }
         }
     }
     (&config.default, Vec::new())
@@ -202,32 +206,55 @@ pub fn matches(pattern: &str, path: &str) -> Option<Vec<(String, String)>> {
 /// Put values into a command. Each `{name}` must have a value; the value is
 /// shell-quoted. Other braces stay as they are.
 pub fn fill(template: &str, vars: &[(String, String)]) -> Result<String> {
-    let mut out = String::new();
-    let mut rest = template;
-    while let Some(start) = rest.find('{') {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + 1..];
-        let end = after.find('}').filter(|&end| {
-            let name = &after[..end];
-            !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-        });
-        match end {
-            Some(end) => {
-                let name = &after[..end];
-                match vars.iter().find(|(k, _)| k == name) {
-                    Some((_, value)) => out.push_str(&exec::quote(value)),
-                    None => bail!("no value for {{{name}}} in {template:?}"),
-                }
-                rest = &after[end + 1..];
-            }
-            None => {
-                out.push('{');
-                rest = after;
-            }
+    substitute(template, |name| {
+        match vars.iter().find(|(k, _)| k == name) {
+            Some((_, value)) => Ok(exec::quote(value)),
+            None => bail!("no value for {{{name}}} in {template:?}"),
         }
+    })
+}
+
+/// Check a command template when the config loads.
+pub fn check_template(template: &str) -> Result<()> {
+    substitute(template, |_| Ok(String::new())).map(drop)
+}
+
+/// Replace each `{name}` with `value(name)`. A placeholder inside shell
+/// quotes is an error: a quoted value inside "..." would still run `$(...)`.
+fn substitute(template: &str, mut value: impl FnMut(&str) -> Result<String>) -> Result<String> {
+    let mut out = String::new();
+    let mut open: Option<char> = None; // the open quote character
+    let mut escaped = false;
+    let mut rest = template;
+    while let Some(c) = rest.chars().next() {
+        let name = placeholder(rest);
+        if let (Some(name), false) = (name, escaped) {
+            if open.is_some() {
+                bail!("{{{name}}} is inside quotes in {template:?}; maid quotes values itself");
+            }
+            out.push_str(&value(name)?);
+            rest = &rest[name.len() + 2..];
+            continue;
+        }
+        match (c, open) {
+            _ if escaped => escaped = false,
+            ('\\', Some('"') | None) => escaped = true,
+            ('\'' | '"', None) => open = Some(c),
+            (q, Some(o)) if q == o => open = None,
+            _ => {}
+        }
+        out.push(c);
+        rest = &rest[c.len_utf8()..];
     }
-    out.push_str(rest);
     Ok(out)
+}
+
+/// The name of the `{name}` placeholder at the start of `text`, if there is one.
+fn placeholder(text: &str) -> Option<&str> {
+    let inner = text.strip_prefix('{')?;
+    let name = &inner[..inner.find('}')?];
+    let valid = !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    valid.then_some(name)
 }
 
 /// The values a worktree command can use.
@@ -307,7 +334,7 @@ pub fn check_status_entries<'a>(entries: impl IntoIterator<Item = &'a str>) -> R
         let Some(file) = entry.strip_prefix("!! ") else {
             return Err(format!("has changes: {entry}"));
         };
-        let file = file.trim_matches('"');
+        // -z gives raw names: no quotes or escapes to undo.
         let is_dir = file.ends_with('/');
         let parts: Vec<&str> = file.trim_end_matches('/').split('/').collect();
         let (last, parents) = parts.split_last().unwrap_or((&"", &[]));
@@ -462,6 +489,34 @@ mod tests {
     }
 
     #[test]
+    fn placeholders_inside_quotes_are_errors() {
+        let vars = vec![("path".to_string(), "/a/$(touch x)".to_string())];
+        for t in [
+            r#"rm "{path}""#,
+            "rm '{path}'",
+            r#"sh -c "cd {path} && ls""#,
+        ] {
+            assert!(
+                fill(t, &vars)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("inside quotes"),
+                "{t}"
+            );
+            assert!(check_template(t).is_err(), "{t}");
+        }
+        assert_eq!(
+            fill(r#"echo "a" {path} 'b'"#, &vars).unwrap(),
+            r#"echo "a" '/a/$(touch x)' 'b'"#
+        );
+        assert_eq!(
+            fill(r#"echo \"{path}"#, &vars).unwrap(),
+            r#"echo \"'/a/$(touch x)'"#
+        );
+        assert!(check_template("wt -C {repo} remove {path}").is_ok());
+    }
+
+    #[test]
     fn filled_command_is_one_word_to_the_shell() {
         let vars = vec![("path".to_string(), "/a b/$(touch x)/c".to_string())];
         let cmd = fill("printf '%s|' {path}", &vars).unwrap();
@@ -510,6 +565,15 @@ mod tests {
         );
         // A file named like a build folder is not a build folder.
         assert_eq!(fail("!! build"), "ignored file is not build output: build");
+        // -z gives raw names; quote characters are part of the name.
+        assert_eq!(
+            fail("!! .DS_Store\""),
+            "ignored file is not build output: .DS_Store\""
+        );
+        assert_eq!(
+            fail("!! \"target/"),
+            "ignored file is not build output: \"target/"
+        );
         assert_eq!(
             fail("!! .DS_Store/"),
             "ignored file is not build output: .DS_Store/"
