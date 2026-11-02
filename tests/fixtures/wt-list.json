@@ -1,0 +1,594 @@
+{
+  "schema": 2,
+  "repo": {
+    "default_branch": "main",
+    "forge": {
+      "url": "https://example.com/acme/api",
+      "provider": "github",
+      "host": "example.com",
+      "owner": "acme",
+      "name": "api",
+      "remote": "origin"
+    }
+  },
+  "collected": {
+    "ci": false,
+    "summary": false
+  },
+  "items": [
+    {
+      "branch": "main",
+      "head": {
+        "sha": "e5584af503ee9b9b09e3cfbc21806ceeac62e2e8",
+        "short_sha": "e5584af50",
+        "subject": "chore: work on main",
+        "committed_at": "2026-01-15T10:00:00Z"
+      },
+      "worktree": {
+        "path": "/Users/dev/src/acme/api",
+        "main": true,
+        "current": false,
+        "previous": false,
+        "detached": false,
+        "branch_mismatch": false,
+        "duplicate_branch": false,
+        "changes": {
+          "staged": false,
+          "modified": false,
+          "untracked": true,
+          "renamed": false,
+          "deleted": false,
+          "conflicted": false,
+          "diff": {
+            "added": 3,
+            "deleted": 1
+          }
+        }
+      },
+      "default_branch": null,
+      "display": {
+        "state": "is_main"
+      }
+    },
+    {
+      "branch": "chore/docs",
+      "head": {
+        "sha": "6a65a64714d37a859633373b3852a1c879cea7cb",
+        "short_sha": "6a65a6471",
+        "subject": "chore: work on chore/docs",
+        "committed_at": "2026-01-15T10:00:00Z"
+      },
+      "worktree": {
+        "path": "/Users/dev/src/acme/api.chore-docs",
+        "main": false,
+        "current": false,
+        "previous": false,
+        "detached": false,
+        "branch_mismatch": false,
+        "duplicate_branch": false,
+        "changes": {
+          "staged": false,
+          "modified": false,
+          "untracked": false,
+          "renamed": false,
+          "deleted": false,
+          "conflicted": false,
+          "diff": {
+            "added": 0,
+            "deleted": 0
+          }
+        }
+      },
+      "default_branch": {
+        "ahead": 4,
+        "behind": 2,
+        "diff": {
+          "added": 0,
+          "deleted": 0
+        },
+        "orphan": false,
+        "integration": {
+          "reason": "patch_id_match"
+        },
+        "merge_conflicts": false
+      },
+      "display": {
+        "state": "integrated"
+      }
+    },
+    {
+      "branch": "feat/search",
+      "head": {
+        "sha": "bd5dac4cc748da10b39f298687d0c62f81d526b9",
+        "short_sha": "bd5dac4cc",
+        "subject": "chore: work on feat/search",
+        "committed_at": "2026-01-15T10:00:00Z"
+      },
+      "worktree": {
+        "path": "/Users/dev/src/acme/api.feat-search",
+        "main": false,
+        "current": false,
+        "previous": false,
+        "detached": false,
+        "branch_mismatch": false,
+        "duplicate_branch": false,
+        "changes": {
+          "staged": false,
+          "modified": false,
+          "untracked": false,
+          "renamed": false,
+          "deleted": false,
+          "conflicted": false,
+          "diff": {
+            "added": 0,
+            "deleted": 0
+          }
+        }
+      },
+      "default_branch": {
+        "ahead": 3,
+        "behind": 5,
+        "diff": {
+          "added": 0,
+          "deleted": 0
+        },
+        "orphan": false,
+        "integration": null,
+        "merge_conflicts": false
+      },
+      "display": {
+        "state": "diverged"
+      }
+    },
+    {
+      "branch": "fix/retry",
+      "head": {
+        "sha": "96018025f1cd205a07e3cbf65a97221e925b3be7",
+        "short_sha": "96018025f",
+        "subject": "chore: work on fix/retry",
+        "committed_at": "2026-01-15T10:00:00Z"
+      },
+      "worktree": {
+        "path": "/Users/dev/src/acme/api.fix-retry",
+        "main": false,
+        "current": false,
+        "previous": false,
+        "detached": false,
+        "branch_mismatch": false,
+        "duplicate_branch": false,
+        "changes": {
+          "staged": false,
+          "modified": false,
+          "untracked": false,
+          "renamed": false,
+          "deleted": false,
+          "conflicted": false,
+          "diff": {
+            "added": 0,
+            "deleted": 0
+          }
+        }
+      },
+      "default_branch": {
+        "ahead": 2,
+        "behind": 7,
+        "diff": {
+          "added": 0,
+          "deleted": 0
+        },
+        "orphan": false,
+        "integration": null,
+        "merge_conflicts": true
+      },
+      "display": {
+        "state": "would_conflict"
+      }
+    },
+    {
+      "branch": "feat/billing-ids",
+      "head": {
+        "sha": "94886815726b9da301cc09d0553c63387fe28678",
+        "short_sha": "948868157",
+        "subject": "chore: work on feat/billing-ids",
+        "committed_at": "2026-01-15T10:00:00Z"
+      },
+      "worktree": {
+        "path": "/Users/dev/src/acme/api.feat-billing-ids",
+        "main": false,
+        "current": false,
+        "previous": false,
+        "detached": false,
+        "branch_mismatch": false,
+        "duplicate_branch": false,
+        "changes": {
+          "staged": false,
+          "modified": false,
+          "untracked": false,
+          "renamed": false,
+          "deleted": false,
+          "conflicted": false,
+          "diff": {
+            "added": 0,
+            "deleted": 0
+          }
+        }
+      },
+      "default_branch": {
+        "ahead": 1,
+        "behind": 3,
+        "diff": {
+          "added": 0,
+          "deleted": 0
+        },
+        "orphan": false,
+        "integration": {
+          "reason": "ancestor"
+        },
+        "merge_conflicts": false
+      },
+      "display": {
+        "state": "integrated"
+      }
+    },
+    {
+      "branch": "wip/cache",
+      "head": {
+        "sha": "e6b42550251026b5af46e19e2bd20d7d34daca34",
+        "short_sha": "e6b425502",
+        "subject": "chore: work on wip/cache",
+        "committed_at": "2026-01-15T10:00:00Z"
+      },
+      "worktree": {
+        "path": "/Users/dev/src/acme/api.wip-cache",
+        "main": false,
+        "current": false,
+        "previous": false,
+        "detached": false,
+        "branch_mismatch": false,
+        "duplicate_branch": false,
+        "changes": {
+          "staged": false,
+          "modified": true,
+          "untracked": false,
+          "renamed": false,
+          "deleted": false,
+          "conflicted": false,
+          "diff": {
+            "added": 3,
+            "deleted": 1
+          }
+        }
+      },
+      "default_branch": {
+        "ahead": 6,
+        "behind": 1,
+        "diff": {
+          "added": 0,
+          "deleted": 0
+        },
+        "orphan": false,
+        "integration": null,
+        "merge_conflicts": true
+      },
+      "display": {
+        "state": "would_conflict"
+      }
+    },
+    {
+      "branch": "fix/log-filter",
+      "head": {
+        "sha": "18d3b3655d5b8e445930d108e12863f273d9a014",
+        "short_sha": "18d3b3655",
+        "subject": "chore: work on fix/log-filter",
+        "committed_at": "2026-01-15T10:00:00Z"
+      },
+      "worktree": {
+        "path": "/Users/dev/src/acme/api.fix-log-filter",
+        "main": false,
+        "current": false,
+        "previous": false,
+        "detached": false,
+        "branch_mismatch": false,
+        "duplicate_branch": false,
+        "changes": {
+          "staged": false,
+          "modified": false,
+          "untracked": false,
+          "renamed": false,
+          "deleted": false,
+          "conflicted": false,
+          "diff": {
+            "added": 0,
+            "deleted": 0
+          }
+        }
+      },
+      "default_branch": {
+        "ahead": 2,
+        "behind": 0,
+        "diff": {
+          "added": 0,
+          "deleted": 0
+        },
+        "orphan": false,
+        "integration": {
+          "reason": "trees_match"
+        },
+        "merge_conflicts": false
+      },
+      "display": {
+        "state": "integrated"
+      }
+    },
+    {
+      "branch": "t3code/review",
+      "head": {
+        "sha": "f1ae145e4189cd4c74c1ead98bd1a6d590ace65a",
+        "short_sha": "f1ae145e4",
+        "subject": "chore: work on t3code/review",
+        "committed_at": "2026-01-15T10:00:00Z"
+      },
+      "worktree": {
+        "path": "/Users/dev/.t3/worktrees/api/t3code-1a2b3c4d",
+        "main": false,
+        "current": false,
+        "previous": false,
+        "detached": false,
+        "branch_mismatch": false,
+        "duplicate_branch": false,
+        "changes": {
+          "staged": false,
+          "modified": false,
+          "untracked": false,
+          "renamed": false,
+          "deleted": false,
+          "conflicted": false,
+          "diff": {
+            "added": 0,
+            "deleted": 0
+          }
+        }
+      },
+      "default_branch": {
+        "ahead": 1,
+        "behind": 9,
+        "diff": {
+          "added": 0,
+          "deleted": 0
+        },
+        "orphan": false,
+        "integration": null,
+        "merge_conflicts": true
+      },
+      "display": {
+        "state": "would_conflict"
+      }
+    },
+    {
+      "branch": "feat/export",
+      "head": {
+        "sha": "a9f3511bc4c31332abbd7a6241f7e18ab6a75dad",
+        "short_sha": "a9f3511bc",
+        "subject": "chore: work on feat/export",
+        "committed_at": "2026-01-15T10:00:00Z"
+      },
+      "worktree": {
+        "path": "/Users/dev/src/acme/api.feat-export",
+        "main": false,
+        "current": false,
+        "previous": false,
+        "detached": false,
+        "branch_mismatch": false,
+        "duplicate_branch": false,
+        "changes": {
+          "staged": false,
+          "modified": false,
+          "untracked": true,
+          "renamed": false,
+          "deleted": false,
+          "conflicted": false,
+          "diff": {
+            "added": 3,
+            "deleted": 1
+          }
+        }
+      },
+      "default_branch": {
+        "ahead": 2,
+        "behind": 0,
+        "diff": {
+          "added": 0,
+          "deleted": 0
+        },
+        "orphan": false,
+        "integration": null,
+        "merge_conflicts": false
+      },
+      "display": {
+        "state": "ahead"
+      }
+    },
+    {
+      "branch": "chore/bump",
+      "head": {
+        "sha": "7883367d97576e27e562bb8b5482d06d4857610e",
+        "short_sha": "7883367d9",
+        "subject": "chore: work on chore/bump",
+        "committed_at": "2026-01-15T10:00:00Z"
+      },
+      "worktree": {
+        "path": "/Users/dev/src/acme/api.chore-bump",
+        "main": false,
+        "current": false,
+        "previous": false,
+        "detached": false,
+        "branch_mismatch": false,
+        "duplicate_branch": false,
+        "changes": {
+          "staged": false,
+          "modified": false,
+          "untracked": false,
+          "renamed": false,
+          "deleted": false,
+          "conflicted": false,
+          "diff": {
+            "added": 0,
+            "deleted": 0
+          }
+        }
+      },
+      "default_branch": {
+        "ahead": 0,
+        "behind": 0,
+        "diff": {
+          "added": 0,
+          "deleted": 0
+        },
+        "orphan": false,
+        "integration": null,
+        "merge_conflicts": false
+      },
+      "display": {
+        "state": "empty"
+      }
+    },
+    {
+      "branch": "feat/charts",
+      "head": {
+        "sha": "308e97d004bfc0531978f967c0da0bfb30750914",
+        "short_sha": "308e97d00",
+        "subject": "chore: work on feat/charts",
+        "committed_at": "2026-01-15T10:00:00Z"
+      },
+      "worktree": {
+        "path": "/Users/dev/src/acme/api.feat-charts",
+        "main": false,
+        "current": false,
+        "previous": false,
+        "detached": false,
+        "branch_mismatch": false,
+        "duplicate_branch": false,
+        "changes": {
+          "staged": false,
+          "modified": false,
+          "untracked": false,
+          "renamed": false,
+          "deleted": false,
+          "conflicted": false,
+          "diff": {
+            "added": 0,
+            "deleted": 0
+          }
+        }
+      },
+      "default_branch": {
+        "ahead": 0,
+        "behind": 4,
+        "diff": {
+          "added": 0,
+          "deleted": 0
+        },
+        "orphan": false,
+        "integration": null,
+        "merge_conflicts": false
+      },
+      "display": {
+        "state": "behind"
+      }
+    },
+    {
+      "branch": null,
+      "head": {
+        "sha": "b84a59af82e82dbdc1b1c1fd5aa4373b85561d2c",
+        "short_sha": "b84a59af8",
+        "subject": null,
+        "committed_at": null
+      },
+      "worktree": {
+        "path": "/private/tmp/api-build-1",
+        "main": false,
+        "current": false,
+        "previous": false,
+        "detached": true,
+        "prunable": {
+          "reason": "gitdir file points to non-existent location"
+        },
+        "branch_mismatch": false,
+        "duplicate_branch": false,
+        "changes": null
+      },
+      "default_branch": null,
+      "display": {}
+    },
+    {
+      "branch": null,
+      "head": {
+        "sha": "44b93b56c82da8efdf708abc2fcc7f062b42983b",
+        "short_sha": "44b93b56c",
+        "subject": null,
+        "committed_at": null
+      },
+      "worktree": {
+        "path": "/private/tmp/api-build-2",
+        "main": false,
+        "current": false,
+        "previous": false,
+        "detached": true,
+        "prunable": {
+          "reason": "gitdir file points to non-existent location"
+        },
+        "branch_mismatch": false,
+        "duplicate_branch": false,
+        "changes": null
+      },
+      "default_branch": null,
+      "display": {}
+    },
+    {
+      "branch": null,
+      "head": {
+        "sha": "3b3de6f001105a87d9532c344fe14f2b3d02bed0",
+        "short_sha": "3b3de6f00",
+        "subject": "chore: work on build",
+        "committed_at": "2026-01-15T10:00:00Z"
+      },
+      "worktree": {
+        "path": "/Users/dev/src/acme/eval/base",
+        "main": false,
+        "current": false,
+        "previous": false,
+        "detached": true,
+        "branch_mismatch": false,
+        "duplicate_branch": false,
+        "changes": {
+          "staged": false,
+          "modified": false,
+          "untracked": false,
+          "renamed": false,
+          "deleted": false,
+          "conflicted": false,
+          "diff": {
+            "added": 0,
+            "deleted": 0
+          }
+        }
+      },
+      "default_branch": {
+        "ahead": 0,
+        "behind": 12,
+        "diff": {
+          "added": 0,
+          "deleted": 0
+        },
+        "orphan": false,
+        "integration": {
+          "reason": "ancestor"
+        },
+        "merge_conflicts": false
+      },
+      "display": {
+        "state": "integrated"
+      }
+    }
+  ]
+}
