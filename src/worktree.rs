@@ -248,11 +248,6 @@ pub fn check_state(wt: &Worktree) -> Result<(), String> {
     if let Some(reason) = &wt.prunable {
         return Err(format!("prunable: {reason}"));
     }
-    match wt.state.as_deref() {
-        Some("integrated") => {}
-        Some(state) => return Err(format!("not integrated (state: {state})")),
-        None => return Err("not integrated (no state)".into()),
-    }
     let Some(c) = &wt.changes else {
         return Err("changes are not known".into());
     };
@@ -269,10 +264,15 @@ pub fn check_state(wt: &Worktree) -> Result<(), String> {
         .filter(|(_, on)| *on)
         .map(|(name, _)| *name)
         .collect();
-    if set.is_empty() {
-        Ok(())
-    } else {
-        Err(format!("has changes: {}", set.join(", ")))
+    if !set.is_empty() {
+        return Err(format!("has changes: {}", set.join(", ")));
+    }
+    // Changes first: wt does not call a branch with changes "integrated",
+    // and "has changes" is the more useful reason.
+    match wt.state.as_deref() {
+        Some("integrated") => Ok(()),
+        Some(state) => Err(format!("not integrated (state: {state})")),
+        None => Err("not integrated (no state)".into()),
     }
 }
 
