@@ -3,8 +3,9 @@
 use std::io::Read;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use wait_timeout::ChildExt;
@@ -14,6 +15,10 @@ pub const TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 /// The number of stderr lines kept when a command fails.
 const TAIL_LINES: usize = 5;
+
+/// How long to read output after a command exits. A process the command
+/// started in the background can keep the pipes open.
+const DRAIN_GRACE: Duration = Duration::from_secs(5);
 
 pub struct Output {
     pub success: bool,
@@ -54,6 +59,8 @@ pub fn run_with_timeout(argv: &[&str], timeout: Duration) -> Result<Output> {
     let mut child = Command::new(argv[0])
         .args(&argv[1..])
         .stdin(Stdio::null())
+        // git status must not refresh the index: a survey changes nothing.
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         // Own process group, so a timeout stops the command and its children.
@@ -75,33 +82,51 @@ pub fn run_with_timeout(argv: &[&str], timeout: Duration) -> Result<Output> {
             );
         }
     };
+    // Read for a short time only, so a background process cannot hold us.
+    let deadline = Instant::now() + DRAIN_GRACE;
+    let collect = |(buf, done): Drain| {
+        let _ = done.recv_timeout(deadline.saturating_duration_since(Instant::now()));
+        let bytes = buf.lock().map(|b| b.clone()).unwrap_or_default();
+        String::from_utf8_lossy(&bytes).into_owned()
+    };
     Ok(Output {
         success: status.success(),
-        stdout: out.join().unwrap_or_default(),
-        stderr: err.join().unwrap_or_default(),
+        stdout: collect(out),
+        stderr: collect(err),
     })
 }
 
-fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> thread::JoinHandle<String> {
+/// What a pipe gave so far, and a channel that closes at end of file.
+type Drain = (Arc<Mutex<Vec<u8>>>, mpsc::Receiver<()>);
+
+/// Read a pipe in a thread.
+fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> Drain {
+    let buf = Arc::new(Mutex::new(Vec::new()));
+    let (tx, rx) = mpsc::channel::<()>();
+    let shared = Arc::clone(&buf);
     thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(mut pipe) = pipe {
-            let _ = pipe.read_to_end(&mut buf);
+        let _tx = tx; // dropped at end of file
+        let Some(mut pipe) = pipe else { return };
+        let mut chunk = [0u8; 8192];
+        while let Ok(n @ 1..) = pipe.read(&mut chunk) {
+            if let Ok(mut b) = shared.lock() {
+                b.extend_from_slice(&chunk[..n]);
+            }
         }
-        String::from_utf8_lossy(&buf).into_owned()
-    })
+    });
+    (buf, rx)
 }
 
-/// Stop the process group that maid started for one command:
-/// SIGTERM, then SIGKILL if it is still there after 5 seconds.
+/// Stop the process group that maid started for one command: SIGTERM,
+/// then SIGKILL after 5 seconds. The group gets SIGKILL even when the
+/// command itself stopped, so its children cannot stay behind.
 fn stop_group(child: &mut std::process::Child) {
     let pgid = -(child.id() as i32);
     // SAFETY: kill(2) with a negative pid signals only our child's group.
     unsafe { libc::kill(pgid, libc::SIGTERM) };
-    if !matches!(child.wait_timeout(Duration::from_secs(5)), Ok(Some(_))) {
-        unsafe { libc::kill(pgid, libc::SIGKILL) };
-        let _ = child.wait();
-    }
+    let _ = child.wait_timeout(Duration::from_secs(5));
+    unsafe { libc::kill(pgid, libc::SIGKILL) };
+    let _ = child.wait();
 }
 
 /// Quote a value for `sh`.
@@ -125,6 +150,15 @@ mod tests {
     fn timeout_stops_the_command() {
         let err = run_with_timeout(&["sh", "-c", "sleep 30"], Duration::from_millis(200));
         assert!(err.err().unwrap().to_string().contains("did not finish"));
+    }
+
+    #[test]
+    fn background_process_cannot_hold_output() {
+        let start = Instant::now();
+        let out = sh("echo hi; sleep 30 &").unwrap();
+        assert!(out.success);
+        assert_eq!(out.stdout, "hi\n");
+        assert!(start.elapsed() < Duration::from_secs(10));
     }
 
     #[test]
