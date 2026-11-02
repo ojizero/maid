@@ -32,11 +32,13 @@ struct Cli {
 enum Command {
     /// Measure targets and worktrees and decide what to clean. Changes nothing.
     Survey {
+        /// Output format
         #[arg(short, long, value_enum, default_value_t = Format::Text)]
         format: Format,
     },
     /// Survey, then run the clean command of each item with decision "clean".
     Cleanup {
+        /// Output format
         #[arg(short, long, value_enum, default_value_t = Format::Text)]
         format: Format,
         /// Show what would run and run the dry_run commands. Changes nothing.
@@ -48,6 +50,7 @@ enum Command {
     },
     /// Print the last run.
     Report {
+        /// Output format (html is not implemented yet)
         #[arg(short, long, value_enum, default_value_t = ReportFormat::Text)]
         format: ReportFormat,
     },
