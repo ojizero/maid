@@ -22,6 +22,8 @@ const DRAIN_GRACE: Duration = Duration::from_secs(5);
 
 pub struct Output {
     pub success: bool,
+    /// The exit code; None when a signal stopped the command.
+    pub code: Option<i32>,
     pub stdout: String,
     pub stderr: String,
 }
@@ -91,6 +93,7 @@ pub fn run_with_timeout(argv: &[&str], timeout: Duration) -> Result<Output> {
     };
     Ok(Output {
         success: status.success(),
+        code: status.code(),
         stdout: collect(out),
         stderr: collect(err),
     })

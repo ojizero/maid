@@ -248,9 +248,7 @@ fn survey_target(t: &Target, home: &Path) -> Entry {
         Action::Clean => {
             item.commands = t.clean.iter().cloned().collect();
             item.decide(Decision::Clean, None);
-            if item.path.as_deref().is_some_and(|p| !Path::new(p).exists()) {
-                skip(&mut item, "path does not exist".into());
-            } else if let Some(reason) = target_blocker(t) {
+            if let Some(reason) = target_blocker(t, home) {
                 skip(&mut item, reason);
             }
         }
@@ -259,6 +257,11 @@ fn survey_target(t: &Target, home: &Path) -> Entry {
         item,
         source: Source::Target(t.clone()),
     }
+}
+
+fn fail(item: &mut Item, error: String) {
+    item.result = Outcome::Failed;
+    item.error = Some(error);
 }
 
 fn skip(item: &mut Item, reason: String) {
@@ -280,11 +283,26 @@ fn measure_target(t: &Target, home: &Path) -> Result<Option<u64>> {
 }
 
 /// The reason not to clean a target now, if there is one.
-fn target_blocker(t: &Target) -> Option<String> {
-    for program in &t.skip_if_running {
-        match exec::run(&["pgrep", "-x", program]) {
-            Ok(out) if out.success => return Some(format!("{program} is running")),
+fn target_blocker(t: &Target, home: &Path) -> Option<String> {
+    if let Some(path) = &t.path {
+        match std::fs::symlink_metadata(sys::expand(path, home)) {
+            Err(_) => return Some("path does not exist".into()),
+            // A link can point the clean command somewhere else.
+            Ok(meta) if meta.file_type().is_symlink() => return Some("path is a symlink".into()),
             Ok(_) => {}
+        }
+    }
+    for program in &t.skip_if_running {
+        // pgrep exits 0 when it finds a process, 1 when it finds none.
+        match exec::run(&["pgrep", "-x", program]) {
+            Ok(out) if out.code == Some(0) => return Some(format!("{program} is running")),
+            Ok(out) if out.code == Some(1) => {}
+            Ok(out) => {
+                return Some(format!(
+                    "cannot check if {program} is running: {}",
+                    out.failure()
+                ));
+            }
             Err(e) => return Some(format!("cannot check if {program} is running: {e:#}")),
         }
     }
@@ -298,10 +316,12 @@ fn target_blocker(t: &Target) -> Option<String> {
     None
 }
 
-/// The size of a folder in bytes, from `du -sk`. None when it does not exist.
+/// The size of a folder in bytes, from `du -skx`. None when it does not exist.
 pub fn du(path: &Path) -> Option<u64> {
     std::fs::symlink_metadata(path).ok()?;
-    let out = exec::run(&["du", "-sk", &path.to_string_lossy()]).ok()?;
+    // -x: stay on this volume, so mounted network or removable volumes
+    // are not read (macOS asks for permission to read them).
+    let out = exec::run(&["du", "-skx", &path.to_string_lossy()]).ok()?;
     // du exits non-zero when some files are unreadable but still prints a total.
     let kib: u64 = out.stdout.split_whitespace().next()?.parse().ok()?;
     Some(kib * 1024)
@@ -437,7 +457,7 @@ fn dry_run(entry: &mut Entry) {
             Some(t) => match worktree::fill(t, &worktree::vars(wt, captures.clone())) {
                 Ok(cmd) => Some(cmd),
                 Err(e) => {
-                    item.error = Some(format!("dry_run: {e:#}"));
+                    fail(item, format!("dry_run: {e:#}"));
                     None
                 }
             },
@@ -453,10 +473,10 @@ fn dry_run(entry: &mut Entry) {
                 progress(&format!("    {line}"));
             }
             if !out.success {
-                item.error = Some(format!("dry_run failed: {}", out.failure()));
+                fail(item, format!("dry_run failed: {}", out.failure()));
             }
         }
-        Err(e) => item.error = Some(format!("dry_run: {e:#}")),
+        Err(e) => fail(item, format!("dry_run: {e:#}")),
     }
 }
 
@@ -467,7 +487,7 @@ fn clean(entry: &mut Entry, config: &Config, home: &Path) {
     // Check again just before cleaning: things change during a long run.
     match &mut entry.source {
         Source::Target(t) => {
-            if let Some(reason) = target_blocker(t) {
+            if let Some(reason) = target_blocker(t, home) {
                 skip(&mut entry.item, reason);
                 return;
             }
@@ -516,13 +536,17 @@ fn clean(entry: &mut Entry, config: &Config, home: &Path) {
             .map(|e| format!("worktree removed, but the branch was not deleted: {e}"));
     }
 
-    let after = match &entry.source {
-        Source::Target(t) => measure_target(t, home).ok().flatten(),
-        _ => item.path.as_ref().and_then(|p| du(Path::new(p))),
+    // A failed measurement leaves freed_bytes unknown; a path that is gone is 0.
+    let after = match (&entry.source, &item.path) {
+        (Source::Target(t), None) => measure_target(t, home).ok().flatten(),
+        (_, Some(p)) if std::fs::symlink_metadata(p).is_err() => Some(0),
+        (_, Some(p)) => du(Path::new(p)),
+        (_, None) => None,
     };
     item.freed_bytes = item
         .size_bytes
-        .map(|before| before.saturating_sub(after.unwrap_or(0)));
+        .zip(after)
+        .map(|(before, after)| before.saturating_sub(after));
     item.commands = ran;
     item.result = if error.is_some() {
         Outcome::Failed
