@@ -351,6 +351,62 @@ fn skip_if_running_skips_the_target() {
 }
 
 #[test]
+fn pgrep_failure_skips_the_target() {
+    let sb = Sandbox::new("pgrep-broken");
+    fs::write(sb.root.join("pgrep-broken"), "").unwrap();
+
+    let out = sb.maid(&["cleanup", "--only", "uv cache", "--format", "json"]);
+    assert_eq!(out.code, 0, "{out}");
+    let uv = item_named(&out.json(), "uv cache").clone();
+    assert_eq!(uv["result"], "skipped", "{uv}");
+    assert!(
+        uv["reason"]
+            .as_str()
+            .unwrap()
+            .starts_with("cannot check if uv is running")
+    );
+    assert!(!is_empty_dir(&sb.home.join(".cache/uv")));
+    assert!(!sb.calls().contains(&"uv cache clean".to_string()));
+}
+
+#[test]
+fn symlinked_target_path_is_not_cleaned() {
+    let sb = Sandbox::new("symlink");
+    let elsewhere = sb.root.join("elsewhere");
+    fs::create_dir_all(&elsewhere).unwrap();
+    fs::write(elsewhere.join("keep"), "data").unwrap();
+    let derived = sb.home.join("Library/Developer/Xcode/DerivedData");
+    fs::create_dir_all(derived.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, &derived).unwrap();
+
+    let out = sb.maid(&["cleanup", "--only", "Xcode DerivedData", "--format", "json"]);
+    assert_eq!(out.code, 0, "{out}");
+    let item = item_named(&out.json(), "Xcode DerivedData").clone();
+    assert_eq!(item["result"], "skipped", "{item}");
+    assert_eq!(item["reason"], "path is a symlink");
+    assert!(elsewhere.join("keep").is_file());
+}
+
+#[test]
+fn failed_dry_run_command_exits_1() {
+    let sb = Sandbox::new("dry-run-fail");
+    sb.set("fail", &["brew"]);
+
+    let out = sb.maid(&["cleanup", "--dry-run", "--format", "json"]);
+    assert_eq!(out.code, 1, "{out}");
+    let brew = item_named(&out.json(), "Homebrew cache").clone();
+    assert_eq!(brew["result"], "failed", "{brew}");
+    assert!(
+        brew["error"]
+            .as_str()
+            .unwrap()
+            .contains("simulated failure"),
+        "{brew}"
+    );
+    assert!(!is_empty_dir(&sb.home.join("Library/Caches/Homebrew")));
+}
+
+#[test]
 fn docker_targets_clean_only_when_docker_runs() {
     let sb = Sandbox::new("docker");
     fs::write(sb.root.join("docker-running"), "").unwrap();

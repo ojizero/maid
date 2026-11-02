@@ -11,6 +11,7 @@
 //!   gitconfig       GIT_CONFIG_GLOBAL
 //!   calls.log       one line per fake tool call: `brew cleanup --prune=all`
 //!   running         program names the fake `pgrep` finds
+//!   pgrep-broken    when it exists, the fake `pgrep` fails (exit 3)
 //!   fail            fake tool names that fail
 //!   docker-running  when it exists, the fake `docker` works
 //!
@@ -115,7 +116,8 @@ if grep -qx "$name" "$S/fail" 2>/dev/null; then
   exit 1
 fi
 case "$name $*" in
-  "pgrep -x "*) grep -qx "$2" "$S/running" 2>/dev/null || exit 1 ;;
+  "pgrep -x "*) test -e "$S/pgrep-broken" && exit 3
+                grep -qx "$2" "$S/running" 2>/dev/null || exit 1 ;;
   "pgrep "*) exit 1 ;;
   "docker info") test -e "$S/docker-running" ;;
   "docker system df "*) test -e "$S/docker-running" && echo 1.5GB ;;
