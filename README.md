@@ -22,9 +22,12 @@ maid report [-f|--format text|json]
 - `cleanup` runs a fresh survey, then runs the clean command of each item
   with decision `clean`, one at a time. Just before each item it checks
   `skip_if_running`, `only_if` and the worktree checks again. When an item
-  fails, maid records the error and continues.
+  fails, maid records the error and continues. A target whose path is a
+  symlink is skipped. If `pgrep` cannot check a program, the target is
+  skipped.
   - `-n`, `--dry-run`: print each planned command with the current size,
     and run the item's `dry_run` command if it has one. Changes nothing.
+    A `dry_run` command that fails marks the item `failed` (exit code 1).
   - `--only NAME`: clean only the target or worktree override with this
     name. You can give it more than once.
 - `report` prints the last run file.
@@ -96,12 +99,19 @@ These checks are in the code, not in the config:
 
 If a check fails, the decision is `ask` and the reason names the check.
 
+A survey does not change files, with one exception that comes from `wt`:
+its first run in a repo writes the default branch to `.git/config`, and it
+keeps a cache in `.git/wt`. maid runs git with `GIT_OPTIONAL_LOCKS=0`, so
+`git status` does not refresh the index.
+
 ## Unknown large folders
 
 `survey` lists folders of 1 GiB or more that no target and no worktree
 covers. It scans the top-level folders of `$HOME` and the children of
 `~/Library/Caches`, `~/Library/Developer`, `~/.cache` and `~/.local/share`.
 The size of a folder does not include the targets and worktrees in it.
+maid measures with `du -skx`, so it does not read other volumes mounted
+inside a folder.
 
 It does not scan the `$HOME` folders that macOS guards with a permission
 prompt (`Desktop`, `Documents`, `Downloads`, `Movies`, `Music`, `Pictures`,

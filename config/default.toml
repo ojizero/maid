@@ -13,7 +13,7 @@
 # A target is one thing on disk that maid measures and maybe cleans.
 #   name             what the report calls it; --only selects by name
 #   action           "clean" or "keep"
-#   path             a folder; survey measures it with du -sk
+#   path             a folder; survey measures it with du -skx
 #   size             or: a command that prints a size, for example "17.3GB"
 #                    (decimal units as Docker prints them; empty = unknown)
 #                    A target has exactly one of path and size.
@@ -23,8 +23,8 @@
 #   only_if          clean only when this command succeeds
 #   why              the reason, shown in the report (required for "keep")
 #
-# Commands run with sh -c and stop after 10 minutes. A target with a path
-# that does not exist is skipped. skip_if_running and only_if are checked
+# Commands run with sh -c and stop after 10 minutes. A target whose path
+# does not exist or is a symlink is skipped. skip_if_running and only_if are checked
 # in survey and again just before clean runs.
 
 # Package caches
@@ -166,7 +166,8 @@ clean         = "wt -C {repo} remove --foreground --yes --no-delete-branch {path
 # and captures it for the commands.
 #
 # Commands can use {repo} (the main checkout), {path}, {branch} and the
-# captures. maid shell-quotes every value it puts in.
+# captures. maid shell-quotes every value it puts in, so do not put a
+# placeholder inside quotes: that is a config error.
 
 [[worktrees.override]]
 name   = "T3"
