@@ -27,12 +27,14 @@ pub fn run(app: &App, args: &Args) -> Result<ExitCode> {
     let config = app.config()?;
     check_only(&config, &args.only)?;
     let mut survey = survey::survey(&config, &app.home);
+    // A planned item has decision clean and passed its checks in the survey.
     let planned = survey
         .entries
         .iter_mut()
-        .filter(|e| e.item.decision == Decision::Clean);
+        .filter(|e| e.item.result == Outcome::Planned);
     for entry in planned {
-        if !args.only.is_empty() && !args.only.contains(&only_name(entry)) {
+        // A worktree item has the name of its rule, so this matches rules too.
+        if !args.only.is_empty() && !args.only.contains(&entry.item.name) {
             entry.item.skip("not selected by --only".into());
         } else if args.dry_run {
             dry_run(entry);
@@ -59,19 +61,8 @@ fn check_only(config: &Config, only: &[String]) -> Result<()> {
     }
 }
 
-/// The name that --only matches: the target or worktree rule name.
-fn only_name(entry: &Entry) -> String {
-    match &entry.source {
-        Source::Worktree { rule, .. } => rule.name.clone(),
-        _ => entry.item.name.clone(),
-    }
-}
-
 fn dry_run(entry: &mut Entry) {
     let item = &mut entry.item;
-    if item.result != Outcome::Planned {
-        return;
-    }
     let size = item.size_bytes.map_or("size unknown".into(), size::human);
     progress(&format!(
         "would clean {} ({size}): {}",
@@ -113,9 +104,6 @@ fn dry_run(entry: &mut Entry) {
 }
 
 fn clean(entry: &mut Entry, config: &Config, home: &Path) {
-    if entry.item.result != Outcome::Planned {
-        return;
-    }
     // Check again just before cleaning: things change during a long run.
     match &mut entry.source {
         Source::Target(t) => {

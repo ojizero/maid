@@ -350,6 +350,25 @@ fn skip_if_running_skips_the_target() {
     assert!(calls.contains(&"uv cache clean".to_string()), "{calls:?}");
 }
 
+/// --only must not hide the reason a target was already skipped.
+#[test]
+fn only_keeps_the_skip_reason() {
+    let sb = Sandbox::new("only-running");
+    sb.set("running", &["brew"]);
+
+    let out = sb.maid(&["cleanup", "--only", "uv cache", "--format", "json"]);
+    assert_eq!(out.code, 0, "{out}");
+    let run = out.json();
+    assert_eq!(
+        item_named(&run, "Homebrew cache")["reason"],
+        "brew is running"
+    );
+    assert_eq!(
+        item_named(&run, "npm cache")["reason"],
+        "not selected by --only"
+    );
+}
+
 #[test]
 fn pgrep_failure_skips_the_target() {
     let sb = Sandbox::new("pgrep-broken");
