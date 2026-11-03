@@ -155,7 +155,11 @@ To release:
 
 `release` stops if HEAD does not have that tag. To run it locally, set `FORGEJO_TOKEN` to a token that can write to the repository.
 
-`dist` cross-builds with `cargo zigbuild` for `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-unknown-linux-musl` and `x86_64-unknown-linux-musl`. The archive names let mise install a release: `mise use forgejo:ojizero/maid`.
+`dist` cross-builds with `cargo zigbuild` for `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-unknown-linux-musl` and `x86_64-unknown-linux-musl`. mise can install a release. The forge requires sign-in, so set `MISE_FORGEJO_ENTERPRISE_TOKEN` to a token that can read the repository, then run:
+
+```
+mise use 'forgejo:ojizero/maid[api_url=https://forge.ojizero.dev/api/v1]'
+```
 
 Each command is a module with a `run` function: `survey.rs`, `cleanup.rs` and `report.rs`. A command with flags defines its own clap `Args` there. `app.rs` holds what all commands share: the home folder, the output format, the config, and saving and printing the run file (`record.rs`). To add a command, add its module and one arm in `main.rs`.
 
