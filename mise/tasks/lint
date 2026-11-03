@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Check the format and run clippy"
+set -euo pipefail
+
+cargo fmt --check
+cargo clippy --all-targets --locked -- -D warnings

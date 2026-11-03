@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Build and run the dev binary, for example: mise run dev -- survey"
+set -euo pipefail
+
+exec cargo run --quiet -- "$@"

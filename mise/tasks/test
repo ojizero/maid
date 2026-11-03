@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Run the unit and end-to-end tests"
+set -euo pipefail
+
+cargo test --locked

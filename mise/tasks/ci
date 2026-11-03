@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+#MISE description="Run all checks: lint and test"
+#MISE depends=["lint", "test"]

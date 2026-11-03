@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Build the release binary to target/release/maid"
+set -euo pipefail
+
+cargo build --release --locked
