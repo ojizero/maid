@@ -9,13 +9,13 @@ use anyhow::Result;
 
 use crate::app::{App, progress, warn};
 use crate::config::{Action, Config, DeleteBranch, Rule, Target};
-use crate::record::{Command, Decision, Item, Kind, Record};
+use crate::record::{Decision, Item, Kind, Record, RunKind};
 use crate::worktree::{self, Worktree};
 use crate::{exec, par, size, sys, target, unknown};
 
 pub fn run(app: &App) -> Result<ExitCode> {
     let survey = survey(&app.config()?, &app.home);
-    app.finish(survey.record(Command::Survey))
+    app.finish(survey.record(RunKind::Survey))
 }
 
 /// An item and what maid needs to clean it.
@@ -60,12 +60,12 @@ pub fn survey(config: &Config, home: &Path) -> Survey {
 
 impl Survey {
     /// Measure free space again and make the record of this command.
-    pub fn record(mut self, command: Command) -> Record {
+    pub fn record(mut self, kind: RunKind) -> Record {
         let free_bytes_after = free(&mut self.warnings);
         Record {
             version: 1,
             host: sys::hostname(),
-            command,
+            kind,
             started_at: self.started_at,
             finished_at: sys::now(),
             free_bytes_before: self.free_bytes_before,

@@ -9,10 +9,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::sys;
 
-/// The command that made a run.
+/// What made a run: the command, and for cleanup, if it was a dry run.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "kebab-case")]
-pub enum Command {
+pub enum RunKind {
     Survey,
     DryRun,
     Cleanup,
@@ -49,7 +49,7 @@ pub struct Record {
     pub host: String,
     /// Named "mode" in the run file.
     #[serde(rename = "mode")]
-    pub command: Command,
+    pub kind: RunKind,
     pub started_at: String,
     pub finished_at: String,
     pub free_bytes_before: Option<u64>,

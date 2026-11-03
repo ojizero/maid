@@ -8,7 +8,7 @@ use anyhow::Result;
 
 use crate::app::{App, progress, usage};
 use crate::config::{Config, DeleteBranch};
-use crate::record::{Command, Decision, Outcome};
+use crate::record::{Decision, Outcome, RunKind};
 use crate::survey::{self, Entry, Source};
 use crate::{exec, size, target, worktree};
 
@@ -42,12 +42,12 @@ pub fn run(app: &App, args: &Args) -> Result<ExitCode> {
             clean(entry, &config, &app.home);
         }
     }
-    let command = if args.dry_run {
-        Command::DryRun
+    let kind = if args.dry_run {
+        RunKind::DryRun
     } else {
-        Command::Cleanup
+        RunKind::Cleanup
     };
-    app.finish(survey.record(command))
+    app.finish(survey.record(kind))
 }
 
 fn check_only(config: &Config, only: &[String]) -> Result<()> {

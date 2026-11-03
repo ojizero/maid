@@ -3,7 +3,7 @@
 use std::fmt::{self, Write};
 use std::path::Path;
 
-use crate::record::{Command, Decision, Kind, Outcome, Record};
+use crate::record::{Decision, Kind, Outcome, Record, RunKind};
 use crate::size::human;
 use crate::sys;
 
@@ -45,10 +45,10 @@ fn write_text(out: &mut String, record: &Record, home: &Path, color: bool) -> fm
         }
     };
     let opt = |b: Option<u64>| b.map_or("?".into(), human);
-    let command = match record.command {
-        Command::Survey => "survey",
-        Command::DryRun => "cleanup --dry-run",
-        Command::Cleanup => "cleanup",
+    let command = match record.kind {
+        RunKind::Survey => "survey",
+        RunKind::DryRun => "cleanup --dry-run",
+        RunKind::Cleanup => "cleanup",
     };
 
     writeln!(
