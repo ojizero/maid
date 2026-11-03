@@ -1,6 +1,10 @@
 //! Parse and format sizes.
 
+use std::path::Path;
+
 use anyhow::{Result, bail};
+
+use crate::exec;
 
 pub const KIB: u64 = 1024;
 pub const MIB: u64 = 1024 * KIB;
@@ -44,6 +48,17 @@ pub fn human(bytes: u64) -> String {
     } else {
         format!("{:.0} MiB", bytes as f64 / MIB as f64)
     }
+}
+
+/// The size of a folder in bytes, from `du -skx`. None when it does not exist.
+pub fn du(path: &Path) -> Option<u64> {
+    std::fs::symlink_metadata(path).ok()?;
+    // -x: stay on this volume, so mounted network or removable volumes
+    // are not read (macOS asks for permission to read them).
+    let out = exec::run(&["du", "-skx", &path.to_string_lossy()]).ok()?;
+    // du exits non-zero when some files are unreadable but still prints a total.
+    let kib: u64 = out.stdout.split_whitespace().next()?.parse().ok()?;
+    Some(kib * 1024)
 }
 
 #[cfg(test)]

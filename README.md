@@ -173,6 +173,13 @@ cargo test
 cargo clippy --all-targets -- -D warnings
 ```
 
+Each command is a module with a `run` function: `survey.rs`,
+`cleanup.rs` and `report.rs`. A command with flags defines its own clap
+`Args` there. `app.rs` holds what all commands share: the home folder,
+the output format, the config, and saving and printing the run file
+(`record.rs`). To add a command, add its module and one arm in
+`main.rs`.
+
 The end-to-end tests run the real binary in a sandbox folder, with fake
 tools first on `PATH` and real `git` and `wt`. They set
 `MAID_TEST_VOLUME` to measure free space on the sandbox folder. Only tests

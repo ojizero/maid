@@ -2,8 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::run::{du, par_map};
-use crate::size::GIB;
+use crate::size::{GIB, du};
+use crate::survey::par_map;
 
 /// Folders this size or larger are reported.
 const MIN_SIZE: u64 = GIB;

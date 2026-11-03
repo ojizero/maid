@@ -1,18 +1,33 @@
-//! Print a run as text or JSON.
+//! Render a run file as text or JSON.
 
 use std::fmt::Write;
 use std::path::Path;
 
-use crate::run::{Command, Decision, Kind, Outcome, Run};
+use crate::record::{Command, Decision, Kind, Outcome, Record};
 use crate::size::human;
 use crate::sys;
 
-pub fn json(run: &Run) -> String {
-    serde_json::to_string_pretty(run).expect("a run is always valid JSON") + "\n"
+#[derive(Clone, Copy, clap::ValueEnum)]
+pub enum Format {
+    Text,
+    Json,
+    Html,
+}
+
+pub fn render(record: &Record, format: Format, home: &Path) -> String {
+    match format {
+        Format::Text => text(record, home, sys::color()),
+        Format::Json => json(record),
+        Format::Html => unreachable!("App::new rejects html"),
+    }
+}
+
+pub fn json(record: &Record) -> String {
+    serde_json::to_string_pretty(record).expect("a record is always valid JSON") + "\n"
 }
 
 /// A table: free space, then the items grouped by decision and result.
-pub fn text(run: &Run, home: &Path, color: bool) -> String {
+pub fn text(record: &Record, home: &Path, color: bool) -> String {
     let bold = |s: &str| {
         if color {
             format!("\x1b[1m{s}\x1b[0m")
@@ -21,7 +36,7 @@ pub fn text(run: &Run, home: &Path, color: bool) -> String {
         }
     };
     let opt = |b: Option<u64>| b.map_or("?".into(), human);
-    let command = match run.command {
+    let command = match record.command {
         Command::Survey => "survey",
         Command::DryRun => "cleanup --dry-run",
         Command::Cleanup => "cleanup",
@@ -33,17 +48,17 @@ pub fn text(run: &Run, home: &Path, color: bool) -> String {
         "{}",
         bold(&format!(
             "maid {command} on {} at {}",
-            run.host, run.finished_at
+            record.host, record.finished_at
         ))
     );
     let _ = writeln!(
         out,
         "Free space: {} before, {} after",
-        opt(run.free_bytes_before),
-        opt(run.free_bytes_after)
+        opt(record.free_bytes_before),
+        opt(record.free_bytes_after)
     );
 
-    let mut items: Vec<_> = run.items.iter().collect();
+    let mut items: Vec<_> = record.items.iter().collect();
     items.sort_by_key(|i| (i.decision, i.result, std::cmp::Reverse(i.size_bytes)));
     let mut groups: Vec<((Decision, Outcome), Vec<_>)> = Vec::new();
     for item in items {
@@ -103,13 +118,13 @@ pub fn text(run: &Run, home: &Path, color: bool) -> String {
             }
         }
     }
-    if !run.warnings.is_empty() {
+    if !record.warnings.is_empty() {
         let _ = writeln!(
             out,
             "\n{}",
-            bold(&format!("Warnings ({})", run.warnings.len()))
+            bold(&format!("Warnings ({})", record.warnings.len()))
         );
-        for w in &run.warnings {
+        for w in &record.warnings {
             let _ = writeln!(out, "  {w}");
         }
     }
