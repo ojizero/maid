@@ -190,7 +190,7 @@ mise run release           # ci and dist, then publish dist/ as a Forgejo releas
 Forgejo Actions runs the same tasks. The workflows only install mise and call one task:
 
 - [`ci.yml`](.forgejo/workflows/ci.yml) runs `mise run ci` on each push to `main` and on each pull request.
-- [`release.yml`](.forgejo/workflows/release.yml) runs `mise run release` when you push a `v*` tag.
+- [`release.yml`](.forgejo/workflows/release.yml) runs `mise run release` when you push a `v*` tag. It runs on the `sagittarius-a` runner, because zig fails at random on the Linux 4.4 kernel of the `docker` runner.
 
 The [`mise` action](.forgejo/actions/mise/action.yml) installs a pinned mise and the tools. It caches mise, the tools, the Cargo registry and `target/` for each job.
 

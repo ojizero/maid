@@ -10,7 +10,9 @@ env:
 
 jobs:
   release:
-    runs-on: docker
+    # The dist task cross-links with zig, which fails at random on the
+    # Linux 4.4 kernel of the `docker` runner (no statx).
+    runs-on: sagittarius-a
     steps:
       - uses: actions/checkout@v4
       - uses: ./.forgejo/actions/mise
