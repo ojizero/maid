@@ -1,0 +1,56 @@
+name: mise
+description: >
+  Install mise and the project tools. A cache keeps mise, the tools, the
+  Cargo registry and target/ between runs of the same job.
+
+inputs:
+  version:
+    description: The mise version to install
+    default: 2026.10.17
+  sha256:
+    description: The SHA-256 of the mise-v<version>-linux-x64 binary
+    default: fe6dd17e68e09682b31d2e7bb7bb755d22636ac1af5d94621e300f2ca9e9fe8a
+
+runs:
+  using: composite
+  steps:
+    # Exact key only: a new tool version starts a clean cache, so old
+    # toolchains do not pile up in it.
+    - name: Restore the tools
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.local/bin/mise
+          ~/.local/share/mise
+          ~/.rustup
+          ~/.cargo/bin
+        key: tools-${{ github.job }}-${{ inputs.version }}-${{ hashFiles('mise.toml', 'mise/tasks/*') }}
+
+    - name: Restore the Cargo registry and target/
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+          target
+        key: cargo-${{ github.job }}-${{ hashFiles('mise.toml', 'Cargo.lock') }}
+        restore-keys: cargo-${{ github.job }}-
+
+    - name: Install mise and the tools
+      shell: bash
+      env:
+        MISE_VERSION: ${{ inputs.version }}
+        MISE_SHA256: ${{ inputs.sha256 }}
+      run: |
+        set -euo pipefail
+        bin="$HOME/.local/bin"
+        if [ ! -x "$bin/mise" ]; then
+          curl -fsSL -o /tmp/mise \
+            "https://github.com/jdx/mise/releases/download/v$MISE_VERSION/mise-v$MISE_VERSION-linux-x64"
+          echo "$MISE_SHA256  /tmp/mise" | sha256sum -c -
+          install -D /tmp/mise "$bin/mise"
+        fi
+        echo "$bin" >> "$GITHUB_PATH"
+        "$bin/mise" trust --yes
+        "$bin/mise" install

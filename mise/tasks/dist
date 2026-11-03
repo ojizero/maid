@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+#MISE description="Build the release archives for each platform to dist/"
+#MISE tools={zig="0.17.0", "aqua:rust-cross/cargo-zigbuild"="0.24.0"}
+set -euo pipefail
+
+targets=(
+  aarch64-apple-darwin
+  x86_64-apple-darwin
+  aarch64-unknown-linux-musl
+  x86_64-unknown-linux-musl
+)
+
+rustup target add "${targets[@]}"
+cargo zigbuild --release --locked "${targets[@]/#/--target=}"
+
+rm -rf dist
+mkdir dist
+for target in "${targets[@]}"; do
+  tar -czf "dist/maid-$target.tar.gz" \
+    -C "target/$target/release" maid \
+    -C "$PWD" LICENSE README.md
+done
+(cd dist && shasum -a 256 -- *.tar.gz > SHA256SUMS)

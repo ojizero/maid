@@ -1,0 +1,19 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.forgejo/actions/mise
+      - run: mise run release
+        env:
+          FORGEJO_TOKEN: ${{ secrets.GITHUB_TOKEN }}

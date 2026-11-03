@@ -123,19 +123,39 @@ Each run writes `$XDG_STATE_HOME/maid/run.json`, else `~/.local/state/maid/run.j
 
 ## Development
 
-Mise installs the toolchain and runs all tasks:
+Mise installs the toolchain and runs all tasks. Each task is a script in [`mise/tasks`](mise/tasks):
 
 ```
 mise install
 mise run dev -- survey     # build and run the dev binary
 mise run test              # unit and end-to-end tests
 mise run lint              # cargo fmt --check and clippy
-mise run check             # lint and test
+mise run ci                # lint and test
 mise run fmt               # format the code
 mise run build             # release binary: target/release/maid
+mise run dist              # release archives for macOS and Linux in dist/
+mise run release           # ci and dist, then publish dist/ as a Forgejo release
 ```
 
 `mise tasks` lists them.
+
+### CI and releases
+
+Forgejo Actions runs the same tasks. The workflows only install mise and call one task:
+
+- [`ci.yml`](.forgejo/workflows/ci.yml) runs `mise run ci` on each push to `main` and on each pull request.
+- [`release.yml`](.forgejo/workflows/release.yml) runs `mise run release` when you push a `v*` tag.
+
+The [`mise` action](.forgejo/actions/mise/action.yml) installs a pinned mise and the tools. It caches mise, the tools, the Cargo registry and `target/` for each job.
+
+To release:
+
+1. Set `version` in `Cargo.toml`, then commit.
+2. Tag that commit `v<version>` and push the tag.
+
+`release` stops if HEAD does not have that tag. To run it locally, set `FORGEJO_TOKEN` to a token that can write to the repository.
+
+`dist` cross-builds with `cargo zigbuild` for `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-unknown-linux-musl` and `x86_64-unknown-linux-musl`. The archive names let mise install a release: `mise use forgejo:ojizero/maid`.
 
 Each command is a module with a `run` function: `survey.rs`, `cleanup.rs` and `report.rs`. A command with flags defines its own clap `Args` there. `app.rs` holds what all commands share: the home folder, the output format, the config, and saving and printing the run file (`record.rs`). To add a command, add its module and one arm in `main.rs`.
 
