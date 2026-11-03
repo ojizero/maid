@@ -5,11 +5,11 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 pub const DEFAULTS: &str = include_str!("../config/default.toml");
 
-#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum Action {
     Clean,
@@ -106,20 +106,19 @@ pub fn load(path: &Path, required: bool) -> Result<Config> {
     let user = match std::fs::read_to_string(path) {
         Ok(text) => {
             check_owner(path)?;
-            Some(text)
+            text
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound && !required => None,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && !required => String::new(),
         Err(e) => return Err(e).with_context(|| format!("cannot read config {}", path.display())),
     };
+    parse(&user).with_context(|| format!("config {}", path.display()))
+}
+
+/// The defaults merged with the text of the user file, checked.
+fn parse(user: &str) -> Result<Config> {
     let defaults: File = toml::from_str(DEFAULTS).context("embedded defaults")?;
-    let user: File = match user {
-        Some(text) => {
-            toml::from_str(&text).with_context(|| format!("config {}", path.display()))?
-        }
-        None => File::default(),
-    };
-    let config = merge(defaults, user)?;
-    validate(&config).with_context(|| format!("config {}", path.display()))?;
+    let config = merge(defaults, toml::from_str(user)?)?;
+    validate(&config)?;
     Ok(config)
 }
 
@@ -139,32 +138,31 @@ fn check_owner(path: &Path) -> Result<()> {
 
 fn merge(defaults: File, user: File) -> Result<Config> {
     let mut seen = HashSet::new();
-    for t in &user.target {
-        if !seen.insert(t.name.as_str()) {
-            bail!("target {:?} is defined twice", t.name);
-        }
-    }
     let mut targets = defaults.target;
     for t in user.target {
+        if !seen.insert(t.name.clone()) {
+            bail!("target {:?} is defined twice", t.name);
+        }
         match targets.iter_mut().find(|d| d.name == t.name) {
             Some(slot) => *slot = t,
             None => targets.push(t),
         }
     }
 
+    // default.toml sets repos, delete_branch and action.
     let (d, u) = (defaults.worktrees, user.worktrees);
     let mut overrides = u.overrides;
     overrides.extend(d.overrides);
     let worktrees = Worktrees {
-        repos: u.repos.or(d.repos).unwrap_or_default(),
+        repos: u.repos.or(d.repos).expect("default repos"),
         delete_branch: u
             .delete_branch
             .or(d.delete_branch)
-            .unwrap_or(DeleteBranch::Never),
+            .expect("default delete_branch"),
         default: Rule {
             name: "worktree".into(),
             path: String::new(),
-            action: u.action.or(d.action).unwrap_or(Action::Keep),
+            action: u.action.or(d.action).expect("default action"),
             why: u.why.or(d.why),
             dry_run: u.dry_run.or(d.dry_run),
             clean: u.clean.or(d.clean),
@@ -183,24 +181,26 @@ fn validate(config: &Config) -> Result<()> {
         }
     }
     let w = &config.worktrees;
-    check_action(
-        "[worktrees]",
-        w.default.action,
-        w.default.clean.as_deref(),
-        w.default.why.as_deref(),
-    )?;
-    for rule in std::iter::once(&w.default).chain(&w.overrides) {
-        for t in [&rule.clean, &rule.dry_run].into_iter().flatten() {
-            crate::worktree::check_template(t)
-                .with_context(|| format!("worktree rule {:?}", rule.name))?;
-        }
-    }
+    check_rule("[worktrees]", &w.default)?;
     for o in &w.overrides {
         let what = format!("worktree override {:?}", o.name);
-        check_action(&what, o.action, o.clean.as_deref(), o.why.as_deref())?;
+        check_rule(&what, o)?;
         if !(o.path.starts_with('/') || o.path.starts_with("~/")) {
             bail!("{what}: path must start with / or ~/");
         }
+    }
+    Ok(())
+}
+
+fn check_rule(what: &str, rule: &Rule) -> Result<()> {
+    check_action(
+        what,
+        rule.action,
+        rule.clean.as_deref(),
+        rule.why.as_deref(),
+    )?;
+    for t in [&rule.clean, &rule.dry_run].into_iter().flatten() {
+        crate::worktree::check_template(t).with_context(|| what.to_string())?;
     }
     Ok(())
 }
@@ -228,12 +228,6 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn parse(user: &str) -> Result<Config> {
-        let config = merge(toml::from_str(DEFAULTS)?, toml::from_str(user)?)?;
-        validate(&config)?;
-        Ok(config)
-    }
 
     fn err(user: &str) -> String {
         format!("{:#}", parse(user).unwrap_err())

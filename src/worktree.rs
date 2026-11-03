@@ -137,7 +137,7 @@ pub fn list(repo: &Path) -> Result<Vec<Worktree>> {
     parse(&out.stdout, repo)
 }
 
-pub fn parse(json: &str, repo: &Path) -> Result<Vec<Worktree>> {
+fn parse(json: &str, repo: &Path) -> Result<Vec<Worktree>> {
     let list: WtList = serde_json::from_str(json).context("cannot read wt list output")?;
     Ok(list
         .items
@@ -179,7 +179,7 @@ pub fn rule_for<'a>(
 
 /// Match a path against a pattern. `*` matches one folder name, `{name}`
 /// matches one folder name and captures it.
-pub fn matches(pattern: &str, path: &str) -> Option<Vec<(String, String)>> {
+fn matches(pattern: &str, path: &str) -> Option<Vec<(String, String)>> {
     let pat: Vec<&str> = pattern.trim_end_matches('/').split('/').collect();
     let segs: Vec<&str> = path.trim_end_matches('/').split('/').collect();
     if pat.len() != segs.len() {
@@ -227,13 +227,12 @@ fn substitute(template: &str, mut value: impl FnMut(&str) -> Result<String>) -> 
     let mut escaped = false;
     let mut rest = template;
     while let Some(c) = rest.chars().next() {
-        let name = placeholder(rest);
-        if let (Some(name), false) = (name, escaped) {
+        if !escaped && let Some((name, after)) = placeholder(rest) {
             if open.is_some() {
                 bail!("{{{name}}} is inside quotes in {template:?}; maid quotes values itself");
             }
             out.push_str(&value(name)?);
-            rest = &rest[name.len() + 2..];
+            rest = after;
             continue;
         }
         match (c, open) {
@@ -249,12 +248,12 @@ fn substitute(template: &str, mut value: impl FnMut(&str) -> Result<String>) -> 
     Ok(out)
 }
 
-/// The name of the `{name}` placeholder at the start of `text`, if there is one.
-fn placeholder(text: &str) -> Option<&str> {
-    let inner = text.strip_prefix('{')?;
-    let name = &inner[..inner.find('}')?];
+/// The `{name}` placeholder at the start of `text`, if there is one: its
+/// name and the text after it.
+fn placeholder(text: &str) -> Option<(&str, &str)> {
+    let (name, after) = text.strip_prefix('{')?.split_once('}')?;
     let valid = !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-    valid.then_some(name)
+    valid.then_some((name, after))
 }
 
 /// The values a worktree command can use.
@@ -320,15 +319,15 @@ pub fn check_ignored(path: &Path) -> Result<(), String> {
     if !out.status.success() {
         return Err(format!("git status failed: {}", out.failure()));
     }
-    check_status_entries(out.stdout.split('\0'))
+    check_status(&out.stdout)
 }
 
-/// Check `git status --porcelain --ignored` entries. Any entry that is not
-/// ignored is a change. An ignored entry must be inside a build folder or be
-/// a `.DS_Store` file.
-pub fn check_status_entries<'a>(entries: impl IntoIterator<Item = &'a str>) -> Result<(), String> {
+/// Check `git status --porcelain --ignored -z` output. Any entry that is
+/// not ignored is a change. An ignored entry must be inside a build folder
+/// or be a `.DS_Store` file.
+fn check_status(out: &str) -> Result<(), String> {
     let mut bad = Vec::new();
-    for entry in entries {
+    for entry in out.split('\0') {
         if entry.is_empty() {
             continue;
         }
@@ -336,12 +335,13 @@ pub fn check_status_entries<'a>(entries: impl IntoIterator<Item = &'a str>) -> R
             return Err(format!("has changes: {entry}"));
         };
         // -z gives raw names: no quotes or escapes to undo.
-        let is_dir = file.ends_with('/');
-        let parts: Vec<&str> = file.trim_end_matches('/').split('/').collect();
-        let (last, parents) = parts.split_last().unwrap_or((&"", &[]));
-        let in_build_dir =
-            parents.iter().any(|p| BUILD_DIRS.contains(p)) || (is_dir && BUILD_DIRS.contains(last));
-        if !(in_build_dir || (!is_dir && *last == ".DS_Store")) {
+        // A folder ends with "/"; it has no file name.
+        let (dirs, name) = match file.strip_suffix('/') {
+            Some(dir) => (dir, ""),
+            None => file.rsplit_once('/').unwrap_or(("", file)),
+        };
+        let in_build_dir = dirs.split('/').any(|d| BUILD_DIRS.contains(&d));
+        if !(in_build_dir || name == ".DS_Store") {
             bad.push(file);
         }
     }
@@ -527,24 +527,24 @@ mod tests {
 
     #[test]
     fn ignored_build_output_passes() {
-        let out = "!! node_modules/\n!! packages/web/.next/\n!! target/\n!! .DS_Store\n!! src/.DS_Store\n!! api/_build/dev/lib/\n!! web/node_modules/.cache/x.json";
-        assert_eq!(check_status_entries(out.lines()), Ok(()));
-        assert_eq!(check_status_entries([""]), Ok(()));
+        let out = "!! node_modules/\0!! packages/web/.next/\0!! target/\0!! .DS_Store\0!! src/.DS_Store\0!! api/_build/dev/lib/\0!! web/node_modules/.cache/x.json";
+        assert_eq!(check_status(out), Ok(()));
+        assert_eq!(check_status(""), Ok(()));
     }
 
     #[test]
     fn ignored_data_fails() {
-        let fail = |out: &str| check_status_entries(out.lines()).unwrap_err();
+        let fail = |out: &str| check_status(out).unwrap_err();
         assert_eq!(
-            fail("!! .env\n!! tmp/"),
+            fail("!! .env\0!! tmp/"),
             "ignored files are not build output: .env, tmp/"
         );
         assert_eq!(
-            fail("!! a\n!! b\n!! node_modules/\n!! c\n!! d\n!! e"),
+            fail("!! a\0!! b\0!! node_modules/\0!! c\0!! d\0!! e"),
             "ignored files are not build output: a, b, c and 2 more"
         );
         assert_eq!(
-            fail("!! node_modules/\n!! .env"),
+            fail("!! node_modules/\0!! .env"),
             "ignored file is not build output: .env"
         );
         assert_eq!(
@@ -585,11 +585,11 @@ mod tests {
     #[test]
     fn changes_in_status_fail() {
         assert_eq!(
-            check_status_entries(["?? new.txt"]),
+            check_status("?? new.txt"),
             Err("has changes: ?? new.txt".into())
         );
         assert_eq!(
-            check_status_entries([" M src/a.rs"]),
+            check_status(" M src/a.rs"),
             Err("has changes:  M src/a.rs".into())
         );
     }
