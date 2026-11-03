@@ -1,2 +1,29 @@
 [tools]
 rust = "latest"
+
+[tasks.dev]
+description = "Build and run the dev binary, for example: mise run dev -- survey"
+run = "cargo run --quiet --"
+
+[tasks.build]
+description = "Build the release binary to target/release/maid"
+run = "cargo build --release --locked"
+
+[tasks.test]
+description = "Run the unit and end-to-end tests"
+run = "cargo test --locked"
+
+[tasks.fmt]
+description = "Format the code"
+run = "cargo fmt"
+
+[tasks.lint]
+description = "Check the format and run clippy"
+run = [
+  "cargo fmt --check",
+  "cargo clippy --all-targets --locked -- -D warnings",
+]
+
+[tasks.check]
+description = "Run all checks: lint and test"
+depends = ["lint", "test"]

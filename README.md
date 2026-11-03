@@ -167,11 +167,19 @@ with mode 0600.
 
 ## Development
 
+Mise installs the toolchain and runs all tasks:
+
 ```
 mise install
-cargo test
-cargo clippy --all-targets -- -D warnings
+mise run dev -- survey     # build and run the dev binary
+mise run test              # unit and end-to-end tests
+mise run lint              # cargo fmt --check and clippy
+mise run check             # lint and test
+mise run fmt               # format the code
+mise run build             # release binary: target/release/maid
 ```
+
+`mise tasks` lists them.
 
 Each command is a module with a `run` function: `survey.rs`,
 `cleanup.rs` and `report.rs`. A command with flags defines its own clap
