@@ -14,6 +14,15 @@ inputs:
 runs:
   using: composite
   steps:
+    # The tool pins are in mise.toml and in the "#MISE tools=" lines of
+    # the tasks. Other changes to the tasks must keep the tools cache.
+    - name: Hash the tool pins
+      id: pins
+      shell: bash
+      run: |
+        hash=$({ cat mise.toml; grep -h '^#MISE tools=' mise/tasks/*; } | sha256sum)
+        echo "hash=${hash%% *}" >> "$GITHUB_OUTPUT"
+
     # Exact key only: a new tool version starts a clean cache, so old
     # toolchains do not pile up in it.
     - name: Restore the tools
@@ -24,7 +33,7 @@ runs:
           ~/.local/share/mise
           ~/.rustup
           ~/.cargo/bin
-        key: tools-${{ github.job }}-${{ inputs.version }}-${{ hashFiles('mise.toml', 'mise/tasks/*') }}
+        key: tools-${{ github.job }}-${{ inputs.version }}-${{ steps.pins.outputs.hash }}
 
     - name: Restore the Cargo registry and target/
       uses: actions/cache@v4
