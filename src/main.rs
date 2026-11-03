@@ -15,7 +15,7 @@ use std::process::ExitCode;
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 
-use run::{Mode, Outcome};
+use run::Outcome;
 
 #[derive(Parser)]
 #[command(version, about = "Free disk space through the tools that own it")]
@@ -24,6 +24,10 @@ struct Cli {
     #[arg(short, long, global = true, value_name = "PATH")]
     config: Option<PathBuf>,
 
+    /// Output format (html is not implemented yet)
+    #[arg(short, long, global = true, value_enum, default_value_t = Format::Text)]
+    format: Format,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -31,39 +35,23 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Measure targets and worktrees and decide what to clean. Changes nothing.
-    Survey {
-        /// Output format
-        #[arg(short, long, value_enum, default_value_t = Format::Text)]
-        format: Format,
-    },
+    Survey,
     /// Survey, then run the clean command of each item with decision "clean".
     Cleanup {
-        /// Output format
-        #[arg(short, long, value_enum, default_value_t = Format::Text)]
-        format: Format,
         /// Show what would run and run the dry_run commands. Changes nothing.
         #[arg(short = 'n', long)]
         dry_run: bool,
-        /// Clean only the target or worktree override with this name (repeatable)
+        /// Clean only the target or worktree rule with this name (repeatable).
+        /// "worktree" selects the worktrees that no override matches.
         #[arg(long, value_name = "NAME")]
         only: Vec<String>,
     },
     /// Print the last run.
-    Report {
-        /// Output format (html is not implemented yet)
-        #[arg(short, long, value_enum, default_value_t = ReportFormat::Text)]
-        format: ReportFormat,
-    },
+    Report,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
 enum Format {
-    Text,
-    Json,
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-enum ReportFormat {
     Text,
     Json,
     Html,
@@ -97,48 +85,37 @@ fn main() -> ExitCode {
 }
 
 fn real_main(cli: Cli) -> Result<ExitCode> {
+    if let Format::Html = cli.format {
+        return usage(Err(anyhow::anyhow!("html output is not implemented yet")));
+    }
     let home = sys::home()?;
     let run_file = run::run_file(&home);
-
-    let (format, mode, only) = match cli.command {
-        Command::Report { format } => {
-            let format = match format {
-                ReportFormat::Text => Format::Text,
-                ReportFormat::Json => Format::Json,
-                ReportFormat::Html => {
-                    return usage(Err(anyhow::anyhow!("html output is not implemented yet")));
-                }
-            };
-            print(&run::load(&run_file)?, format, &home);
-            return Ok(ExitCode::SUCCESS);
-        }
-        Command::Survey { format } => (format, Mode::Survey, Vec::new()),
-        Command::Cleanup {
-            format,
-            dry_run,
-            only,
-        } => (
-            format,
-            if dry_run { Mode::DryRun } else { Mode::Cleanup },
-            only,
-        ),
+    let config = || {
+        let (path, required) = config::user_path(cli.config.as_deref(), &home);
+        usage(config::load(&path, required))
     };
 
-    let (path, required) = config::user_path(cli.config.as_deref(), &home);
-    let config = usage(config::load(&path, required))?;
-    let names = config.names();
-    for name in &only {
-        if !names.contains(&name.as_str()) {
-            return usage(Err(anyhow::anyhow!(
-                "--only {name:?} matches no target or override (names: {})",
-                names.join(", ")
-            )));
+    let run = match &cli.command {
+        Command::Report => {
+            print(&run::load(&run_file)?, cli.format, &home);
+            return Ok(ExitCode::SUCCESS);
         }
-    }
+        Command::Survey => run::survey(&config()?, &home).finish(),
+        Command::Cleanup { dry_run, only } => {
+            let config = config()?;
+            check_only(&config, only)?;
+            let mut survey = run::survey(&config, &home);
+            if *dry_run {
+                survey.dry_run(only);
+            } else {
+                survey.clean(&config, &home, only);
+            }
+            survey.finish()
+        }
+    };
 
-    let run = run::execute(&config, &home, &run::Options { mode, only: &only })?;
     run::save(&run, &run_file)?;
-    print(&run, format, &home);
+    print(&run, cli.format, &home);
     let failed = run.items.iter().any(|i| i.result == Outcome::Failed);
     Ok(if failed {
         ExitCode::FAILURE
@@ -147,9 +124,21 @@ fn real_main(cli: Cli) -> Result<ExitCode> {
     })
 }
 
+fn check_only(config: &config::Config, only: &[String]) -> Result<()> {
+    let names = config.names();
+    match only.iter().find(|name| !names.contains(&name.as_str())) {
+        Some(name) => usage(Err(anyhow::anyhow!(
+            "--only {name:?} matches no target or worktree rule (names: {})",
+            names.join(", ")
+        ))),
+        None => Ok(()),
+    }
+}
+
 fn print(run: &run::Run, format: Format, home: &std::path::Path) {
     match format {
         Format::Text => print!("{}", output::text(run, home, sys::color())),
         Format::Json => print!("{}", output::json(run)),
+        Format::Html => unreachable!("html is rejected before the run"),
     }
 }

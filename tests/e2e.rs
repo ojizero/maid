@@ -497,12 +497,37 @@ fn missing_config_flag_file_is_a_usage_error() {
 }
 
 #[test]
+fn only_worktree_removes_only_default_worktrees() {
+    let sb = Sandbox::new("only-worktree");
+    if !sb.has_wt() {
+        return;
+    }
+    let repo = sb.make_repo();
+
+    let out = sb.maid(&["cleanup", "--only", "worktree", "--format", "json"]);
+    assert_eq!(out.code, 0, "{out}");
+    let run = out.json();
+
+    assert!(!repo.pushed.exists());
+    assert!(!repo.local.exists());
+    assert!(repo.t3.exists());
+    for cache in ["Library/Caches/Homebrew", ".cache/uv", ".npm/_cacache"] {
+        assert!(!is_empty_dir(&sb.home.join(cache)), "{cache}");
+    }
+    assert_eq!(
+        item_named(&run, "uv cache")["reason"],
+        "not selected by --only"
+    );
+    assert_eq!(item_at(&run, &repo.pushed)["result"], "done");
+}
+
+#[test]
 fn unknown_only_name_is_a_usage_error() {
     let sb = Sandbox::new("bad-only");
     assert_fails(
         &sb.maid(&["cleanup", "--only", "nope"]),
         2,
-        "--only \"nope\" matches no target or override",
+        "--only \"nope\" matches no target or worktree rule",
     );
     assert!(sb.calls().is_empty());
 }
@@ -510,11 +535,14 @@ fn unknown_only_name_is_a_usage_error() {
 #[test]
 fn report_errors() {
     let sb = Sandbox::new("report");
-    assert_fails(
-        &sb.maid(&["report", "--format", "html"]),
-        2,
-        "html output is not implemented yet",
-    );
+    for command in ["survey", "cleanup", "report"] {
+        assert_fails(
+            &sb.maid(&[command, "--format", "html"]),
+            2,
+            "html output is not implemented yet",
+        );
+    }
+    assert!(sb.calls().is_empty());
     assert_fails(&sb.maid(&["report"]), 1, "run `maid survey` first");
 }
 

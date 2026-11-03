@@ -215,12 +215,13 @@ fn check_action(what: &str, action: Action, clean: Option<&str>, why: Option<&st
 }
 
 impl Config {
-    /// Every name that --only accepts.
+    /// Every name that --only accepts: targets, worktree overrides, and
+    /// "worktree" for the [worktrees] default.
     pub fn names(&self) -> Vec<&str> {
+        let w = &self.worktrees;
+        let rules = w.overrides.iter().chain(std::iter::once(&w.default));
         let targets = self.targets.iter().map(|t| t.name.as_str());
-        targets
-            .chain(self.worktrees.overrides.iter().map(|o| o.name.as_str()))
-            .collect()
+        targets.chain(rules.map(|r| r.name.as_str())).collect()
     }
 }
 

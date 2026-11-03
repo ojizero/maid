@@ -17,9 +17,10 @@ use crate::{exec, size, sys, unknown};
 /// How many measurements run at the same time.
 const JOBS: usize = 8;
 
+/// The command that made a run.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "kebab-case")]
-pub enum Mode {
+pub enum Command {
     Survey,
     DryRun,
     Cleanup,
@@ -54,7 +55,9 @@ pub enum Outcome {
 pub struct Run {
     pub version: u32,
     pub host: String,
-    pub mode: Mode,
+    /// Named "mode" in the run file.
+    #[serde(rename = "mode")]
+    pub command: Command,
     pub started_at: String,
     pub finished_at: String,
     pub free_bytes_before: Option<u64>,
@@ -125,48 +128,79 @@ enum Source {
     None,
 }
 
-pub struct Options<'a> {
-    pub mode: Mode,
-    /// Clean only targets and overrides with these names. Empty means all.
-    pub only: &'a [String],
+/// What a survey found. A cleanup acts on it; `finish` makes the run.
+pub struct Survey {
+    command: Command,
+    started_at: String,
+    free_bytes_before: Option<u64>,
+    entries: Vec<Entry>,
+    warnings: Vec<String>,
 }
 
-/// Survey, then clean or dry-run when the mode asks for it.
-pub fn execute(config: &Config, home: &Path, opts: &Options) -> Result<Run> {
+/// Measure every target, worktree and unknown large folder, and decide
+/// what to do with each. Changes nothing.
+pub fn survey(config: &Config, home: &Path) -> Survey {
     let started_at = sys::now();
     let mut warnings = Vec::new();
     let free_bytes_before = free(&mut warnings);
+    let entries = survey_entries(config, home, &mut warnings);
+    Survey {
+        command: Command::Survey,
+        started_at,
+        free_bytes_before,
+        entries,
+        warnings,
+    }
+}
 
-    let mut entries = survey(config, home, &mut warnings);
-    if opts.mode != Mode::Survey {
-        for entry in &mut entries {
-            if entry.item.decision != Decision::Clean {
-                continue;
-            }
-            if !opts.only.is_empty() && !opts.only.contains(&entry.source_name()) {
-                entry.item.result = Outcome::Skipped;
-                entry.item.reason = Some("not selected by --only".into());
-                continue;
-            }
-            match opts.mode {
-                Mode::DryRun => dry_run(entry),
-                _ => clean(entry, config, home),
-            }
+impl Survey {
+    /// Print the commands of each planned item and run its dry_run command.
+    pub fn dry_run(&mut self, only: &[String]) {
+        self.command = Command::DryRun;
+        for entry in self.planned(only) {
+            dry_run(entry);
         }
     }
 
-    let free_bytes_after = free(&mut warnings);
-    Ok(Run {
-        version: 1,
-        host: sys::hostname(),
-        mode: opts.mode,
-        started_at,
-        finished_at: sys::now(),
-        free_bytes_before,
-        free_bytes_after,
-        items: entries.into_iter().map(|e| e.item).collect(),
-        warnings,
-    })
+    /// Run the clean command of each planned item, one at a time.
+    pub fn clean(&mut self, config: &Config, home: &Path, only: &[String]) {
+        self.command = Command::Cleanup;
+        for entry in self.planned(only) {
+            clean(entry, config, home);
+        }
+    }
+
+    /// The items with decision clean that `only` selects (empty selects
+    /// all). The ones it does not select are marked skipped.
+    fn planned<'a>(&'a mut self, only: &'a [String]) -> impl Iterator<Item = &'a mut Entry> {
+        let clean = self
+            .entries
+            .iter_mut()
+            .filter(|e| e.item.decision == Decision::Clean);
+        clean.filter_map(move |e| {
+            if only.is_empty() || only.contains(&e.source_name()) {
+                return Some(e);
+            }
+            skip(&mut e.item, "not selected by --only".into());
+            None
+        })
+    }
+
+    /// Measure free space again and make the run.
+    pub fn finish(mut self) -> Run {
+        let free_bytes_after = free(&mut self.warnings);
+        Run {
+            version: 1,
+            host: sys::hostname(),
+            command: self.command,
+            started_at: self.started_at,
+            finished_at: sys::now(),
+            free_bytes_before: self.free_bytes_before,
+            free_bytes_after,
+            items: self.entries.into_iter().map(|e| e.item).collect(),
+            warnings: self.warnings,
+        }
+    }
 }
 
 fn free(warnings: &mut Vec<String>) -> Option<u64> {
@@ -185,7 +219,7 @@ fn progress(message: &str) {
 }
 
 impl Entry {
-    /// The name that --only matches: the target or override name.
+    /// The name that --only matches: the target or worktree rule name.
     fn source_name(&self) -> String {
         match &self.source {
             Source::Worktree { rule, .. } => rule.name.clone(),
@@ -196,7 +230,7 @@ impl Entry {
 
 // ── Survey ───────────────────────────────────────────────────────
 
-fn survey(config: &Config, home: &Path, warnings: &mut Vec<String>) -> Vec<Entry> {
+fn survey_entries(config: &Config, home: &Path, warnings: &mut Vec<String>) -> Vec<Entry> {
     progress(&format!("measuring {} targets", config.targets.len()));
     let mut entries = par_map(&config.targets, |t| survey_target(t, home));
     for e in &entries {

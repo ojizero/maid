@@ -145,6 +145,8 @@ why    = "installed runtimes; mise prune also uninstalls versions in use elsewhe
 #   integrated, no changes, ignored files are only build output.
 # If one check fails, the worktree goes to Ask.
 #
+# `--only worktree` selects the worktrees that no override matches.
+#
 # delete_branch: what to do with the branch after the worktree is removed.
 # It applies only to worktrees that the [worktrees] clean command removes,
 # because that command keeps the branch (--no-delete-branch).

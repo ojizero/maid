@@ -12,10 +12,13 @@ config, for Xcode DerivedData, which has no owner command.
 ## Usage
 
 ```
-maid [-c|--config PATH] survey  [-f|--format text|json]
-maid [-c|--config PATH] cleanup [-f|--format text|json] [-n|--dry-run] [--only NAME]...
-maid report [-f|--format text|json]
+maid [-c|--config PATH] [-f|--format text|json|html] survey
+maid [-c|--config PATH] [-f|--format text|json|html] cleanup [-n|--dry-run] [--only NAME]...
+maid [-f|--format text|json|html] report
 ```
+
+`-c` and `-f` can also come after the command. The `html` format is not
+implemented yet: it fails with exit code 2 before maid does any work.
 
 - `survey` measures every target and worktree, finds large folders that
   nothing covers, and decides what to do with each. It changes nothing.
@@ -28,8 +31,9 @@ maid report [-f|--format text|json]
   - `-n`, `--dry-run`: print each planned command with the current size,
     and run the item's `dry_run` command if it has one. Changes nothing.
     A `dry_run` command that fails marks the item `failed` (exit code 1).
-  - `--only NAME`: clean only the target or worktree override with this
-    name. You can give it more than once.
+  - `--only NAME`: clean only the target or worktree rule with this name.
+    `worktree` selects the worktrees that no override matches. You can
+    give it more than once.
 - `report` prints the last run file.
 
 Results go to stdout. Progress and warnings go to stderr. The text output

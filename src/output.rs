@@ -3,7 +3,7 @@
 use std::fmt::Write;
 use std::path::Path;
 
-use crate::run::{Decision, Kind, Mode, Outcome, Run};
+use crate::run::{Command, Decision, Kind, Outcome, Run};
 use crate::size::human;
 use crate::sys;
 
@@ -21,10 +21,10 @@ pub fn text(run: &Run, home: &Path, color: bool) -> String {
         }
     };
     let opt = |b: Option<u64>| b.map_or("?".into(), human);
-    let mode = match run.mode {
-        Mode::Survey => "survey",
-        Mode::DryRun => "cleanup --dry-run",
-        Mode::Cleanup => "cleanup",
+    let command = match run.command {
+        Command::Survey => "survey",
+        Command::DryRun => "cleanup --dry-run",
+        Command::Cleanup => "cleanup",
     };
 
     let mut out = String::new();
@@ -32,7 +32,7 @@ pub fn text(run: &Run, home: &Path, color: bool) -> String {
         out,
         "{}",
         bold(&format!(
-            "maid {mode} on {} at {}",
+            "maid {command} on {} at {}",
             run.host, run.finished_at
         ))
     );
