@@ -1,11 +1,12 @@
 //! Run external commands with a timeout and captured output.
 
-use std::io::Read;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek};
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::CommandExt;
-use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex, mpsc};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::{Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use wait_timeout::ChildExt;
@@ -16,20 +17,15 @@ pub const TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// The number of stderr lines kept when a command fails.
 const TAIL_LINES: usize = 5;
 
-/// How long to read output after a command exits. A process the command
-/// started in the background can keep the pipes open.
-const DRAIN_GRACE: Duration = Duration::from_secs(5);
-
 pub struct Output {
-    pub success: bool,
-    /// The exit code; None when a signal stopped the command.
-    pub code: Option<i32>,
+    pub status: ExitStatus,
     pub stdout: String,
     pub stderr: String,
 }
 
 impl Output {
-    /// A short error text: the exit status and the last stderr lines.
+    /// A short error text: the last stderr lines, or stdout lines when
+    /// stderr is empty.
     pub fn failure(&self) -> String {
         let text = if self.stderr.trim().is_empty() {
             &self.stdout
@@ -52,72 +48,63 @@ pub fn sh(cmd: &str) -> Result<Output> {
 
 /// Run a program with arguments. The program is found on PATH.
 /// An error means the program did not start or did not stop in time.
-/// A non-zero exit is not an error: see `Output::success`.
+/// A non-zero exit is not an error: see `Output::status`.
 pub fn run(argv: &[&str]) -> Result<Output> {
     run_with_timeout(argv, TIMEOUT)
 }
 
-pub fn run_with_timeout(argv: &[&str], timeout: Duration) -> Result<Output> {
+fn run_with_timeout(argv: &[&str], timeout: Duration) -> Result<Output> {
+    let (mut stdout, mut stderr) = (scratch_file()?, scratch_file()?);
     let mut child = Command::new(argv[0])
         .args(&argv[1..])
         .stdin(Stdio::null())
         // git status must not refresh the index: a survey changes nothing.
         .env("GIT_OPTIONAL_LOCKS", "0")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(stdout.try_clone()?)
+        .stderr(stderr.try_clone()?)
         // Own process group, so a timeout stops the command and its children.
         .process_group(0)
         .spawn()
         .with_context(|| format!("cannot start {}", argv[0]))?;
 
-    let out = drain(child.stdout.take());
-    let err = drain(child.stderr.take());
-
-    let status = match child.wait_timeout(timeout)? {
-        Some(status) => status,
-        None => {
-            stop_group(&mut child);
-            bail!(
-                "{} did not finish in {} s and was stopped",
-                argv.join(" "),
-                timeout.as_secs()
-            );
-        }
-    };
-    // Read for a short time only, so a background process cannot hold us.
-    let deadline = Instant::now() + DRAIN_GRACE;
-    let collect = |(buf, done): Drain| {
-        let _ = done.recv_timeout(deadline.saturating_duration_since(Instant::now()));
-        let bytes = buf.lock().map(|b| b.clone()).unwrap_or_default();
-        String::from_utf8_lossy(&bytes).into_owned()
+    let Some(status) = child.wait_timeout(timeout)? else {
+        stop_group(&mut child);
+        bail!(
+            "{} did not finish in {} s and was stopped",
+            argv.join(" "),
+            timeout.as_secs()
+        );
     };
     Ok(Output {
-        success: status.success(),
-        code: status.code(),
-        stdout: collect(out),
-        stderr: collect(err),
+        status,
+        stdout: read_all(&mut stdout)?,
+        stderr: read_all(&mut stderr)?,
     })
 }
 
-/// What a pipe gave so far, and a channel that closes at end of file.
-type Drain = (Arc<Mutex<Vec<u8>>>, mpsc::Receiver<()>);
+/// A file with no name, for the output of one command. It is a file and
+/// not a pipe, so a process that the command started in the background
+/// and that keeps it open cannot make maid wait.
+fn scratch_file() -> Result<File> {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!("maid-{}-{n}", std::process::id()));
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+        .with_context(|| format!("cannot create {}", path.display()))?;
+    std::fs::remove_file(&path)?;
+    Ok(file)
+}
 
-/// Read a pipe in a thread.
-fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> Drain {
-    let buf = Arc::new(Mutex::new(Vec::new()));
-    let (tx, rx) = mpsc::channel::<()>();
-    let shared = Arc::clone(&buf);
-    thread::spawn(move || {
-        let _tx = tx; // dropped at end of file
-        let Some(mut pipe) = pipe else { return };
-        let mut chunk = [0u8; 8192];
-        while let Ok(n @ 1..) = pipe.read(&mut chunk) {
-            if let Ok(mut b) = shared.lock() {
-                b.extend_from_slice(&chunk[..n]);
-            }
-        }
-    });
-    (buf, rx)
+fn read_all(file: &mut File) -> Result<String> {
+    file.rewind()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// Stop the process group that maid started for one command: SIGTERM,
@@ -139,6 +126,8 @@ pub fn quote(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
     use super::*;
 
     #[test]
@@ -159,15 +148,15 @@ mod tests {
     fn background_process_cannot_hold_output() {
         let start = Instant::now();
         let out = sh("echo hi; sleep 30 &").unwrap();
-        assert!(out.success);
+        assert!(out.status.success());
         assert_eq!(out.stdout, "hi\n");
-        assert!(start.elapsed() < Duration::from_secs(10));
+        assert!(start.elapsed() < Duration::from_secs(2));
     }
 
     #[test]
     fn failure_keeps_last_stderr_lines() {
         let out = sh("for i in 1 2 3 4 5 6 7; do echo line$i >&2; done; exit 3").unwrap();
-        assert!(!out.success);
+        assert!(!out.status.success());
         assert_eq!(out.failure(), "line3\nline4\nline5\nline6\nline7");
     }
 }

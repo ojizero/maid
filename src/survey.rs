@@ -161,7 +161,7 @@ pub fn measure_target(t: &Target, home: &Path) -> Result<Option<u64>> {
     }
     let cmd = t.size.as_deref().unwrap_or_default();
     let out = exec::sh(cmd)?;
-    if !out.success {
+    if !out.status.success() {
         // Docker prints nothing useful when it is not running: the size is not known.
         return Ok(None);
     }
@@ -181,8 +181,10 @@ pub fn target_blocker(t: &Target, home: &Path) -> Option<String> {
     for program in &t.skip_if_running {
         // pgrep exits 0 when it finds a process, 1 when it finds none.
         match exec::run(&["pgrep", "-x", program]) {
-            Ok(out) if out.code == Some(0) => return Some(format!("{program} is running")),
-            Ok(out) if out.code == Some(1) => {}
+            Ok(out) if out.status.code() == Some(0) => {
+                return Some(format!("{program} is running"));
+            }
+            Ok(out) if out.status.code() == Some(1) => {}
             Ok(out) => {
                 return Some(format!(
                     "cannot check if {program} is running: {}",
@@ -194,7 +196,7 @@ pub fn target_blocker(t: &Target, home: &Path) -> Option<String> {
     }
     if let Some(cmd) = &t.only_if {
         match exec::sh(cmd) {
-            Ok(out) if out.success => {}
+            Ok(out) if out.status.success() => {}
             Ok(_) => return Some(format!("only_if failed: {cmd}")),
             Err(e) => return Some(format!("only_if failed: {e:#}")),
         }

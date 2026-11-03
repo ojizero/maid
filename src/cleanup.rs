@@ -95,7 +95,7 @@ fn dry_run(entry: &mut Entry) {
             for line in exec::tail(&out.stdout, 20).lines() {
                 progress(&format!("    {line}"));
             }
-            if !out.success {
+            if !out.status.success() {
                 item.fail(format!("dry_run failed: {}", out.failure()));
             }
         }
@@ -139,7 +139,7 @@ fn clean(entry: &mut Entry, config: &Config, home: &Path) {
     let mut ran = vec![cmd.clone()];
     let result = exec::sh(&cmd);
     let mut error = match result {
-        Ok(out) if out.success => None,
+        Ok(out) if out.status.success() => None,
         Ok(out) => Some(out.failure()),
         Err(e) => Some(format!("{e:#}")),
     };
@@ -189,7 +189,7 @@ fn delete_branch(
     if policy == DeleteBranch::Pushed {
         let out = exec::run(&["git", "-C", &repo_s, "branch", "-r", "--contains", branch])
             .map_err(|e| format!("{e:#}"))?;
-        if !out.success {
+        if !out.status.success() {
             return Err(out.failure());
         }
         if out.stdout.trim().is_empty() {
@@ -199,7 +199,7 @@ fn delete_branch(
     ran.push(survey::branch_delete(repo, branch));
     let out =
         exec::run(&["git", "-C", &repo_s, "branch", "-D", branch]).map_err(|e| format!("{e:#}"))?;
-    if out.success {
+    if out.status.success() {
         Ok(())
     } else {
         Err(out.failure())

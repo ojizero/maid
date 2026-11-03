@@ -131,7 +131,7 @@ fn walk(dir: &Path, depth: usize, found: &mut Vec<PathBuf>) {
 pub fn list(repo: &Path) -> Result<Vec<Worktree>> {
     let repo_s = repo.to_string_lossy();
     let out = exec::run(&["wt", "-C", &repo_s, "list", "--format=json"])?;
-    if !out.success {
+    if !out.status.success() {
         bail!("wt list failed: {}", out.failure());
     }
     parse(&out.stdout, repo)
@@ -317,7 +317,7 @@ pub fn check_ignored(path: &Path) -> Result<(), String> {
         "-z",
     ])
     .map_err(|e| format!("git status failed: {e:#}"))?;
-    if !out.success {
+    if !out.status.success() {
         return Err(format!("git status failed: {}", out.failure()));
     }
     check_status_entries(out.stdout.split('\0'))
