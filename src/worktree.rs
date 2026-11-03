@@ -258,7 +258,7 @@ fn placeholder(text: &str) -> Option<&str> {
 }
 
 /// The values a worktree command can use.
-pub fn vars(wt: &Worktree, captures: Vec<(String, String)>) -> Vec<(String, String)> {
+pub fn vars(wt: &Worktree, captures: &[(String, String)]) -> Vec<(String, String)> {
     let mut vars = vec![
         ("repo".to_string(), wt.repo.to_string_lossy().into_owned()),
         ("path".to_string(), wt.path.clone()),
@@ -266,7 +266,7 @@ pub fn vars(wt: &Worktree, captures: Vec<(String, String)>) -> Vec<(String, Stri
     if let Some(branch) = &wt.branch {
         vars.push(("branch".to_string(), branch.clone()));
     }
-    vars.extend(captures);
+    vars.extend_from_slice(captures);
     vars
 }
 

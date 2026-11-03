@@ -2,8 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::app::warn;
+use crate::par;
 use crate::size::{GIB, du};
-use crate::survey::par_map;
 
 /// Folders this size or larger are reported.
 const MIN_SIZE: u64 = GIB;
@@ -58,9 +59,7 @@ pub fn scan(
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => {
-            let message = format!("cannot scan {}: {e}", dir.display());
-            eprintln!("maid: warning: {message}");
-            warnings.push(message);
+            warn(warnings, format!("cannot scan {}: {e}", dir.display()));
         }
     };
     add_children(home, SKIP_TOP);
@@ -73,7 +72,7 @@ pub fn scan(
         .into_iter()
         .filter(|c| !known.iter().any(|(k, _)| c.starts_with(k)))
         .collect();
-    let sizes = par_map(&todo, |dir| du(dir));
+    let sizes = par::map(&todo, |dir| du(dir));
 
     let mut found = Vec::new();
     for (path, size) in todo.into_iter().zip(sizes) {

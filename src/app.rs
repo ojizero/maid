@@ -62,6 +62,12 @@ pub fn progress(message: &str) {
     eprintln!("maid: {message}");
 }
 
+/// A warning goes to stderr and to the run file.
+pub fn warn(warnings: &mut Vec<String>, message: String) {
+    eprintln!("maid: warning: {message}");
+    warnings.push(message);
+}
+
 /// An error in how maid was called or configured: exit code 2.
 #[derive(Debug)]
 pub struct UsageError(anyhow::Error);

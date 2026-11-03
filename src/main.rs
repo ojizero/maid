@@ -5,11 +5,13 @@ mod cleanup;
 mod config;
 mod exec;
 mod output;
+mod par;
 mod record;
 mod report;
 mod size;
 mod survey;
 mod sys;
+mod target;
 mod unknown;
 mod worktree;
 

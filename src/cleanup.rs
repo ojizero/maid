@@ -10,7 +10,7 @@ use crate::app::{App, progress, usage};
 use crate::config::{Config, DeleteBranch};
 use crate::record::{Command, Decision, Outcome};
 use crate::survey::{self, Entry, Source};
-use crate::{exec, size, worktree};
+use crate::{exec, size, target, worktree};
 
 #[derive(clap::Args)]
 pub struct Args {
@@ -72,23 +72,11 @@ fn dry_run(entry: &mut Entry) {
     for cmd in &item.commands {
         progress(&format!("  would run: {cmd}"));
     }
-    let dry = match &entry.source {
-        Source::Target(t) => t.dry_run.clone(),
-        Source::Worktree {
-            wt, rule, captures, ..
-        } => match &rule.dry_run {
-            Some(t) => match worktree::fill(t, &worktree::vars(wt, captures.clone())) {
-                Ok(cmd) => Some(cmd),
-                Err(e) => {
-                    item.fail(format!("dry_run: {e:#}"));
-                    None
-                }
-            },
-            None => None,
-        },
-        Source::None => None,
+    let cmd = match dry_run_command(&entry.source) {
+        Ok(Some(cmd)) => cmd,
+        Ok(None) => return,
+        Err(e) => return item.fail(format!("dry_run: {e:#}")),
     };
-    let Some(cmd) = dry else { return };
     progress(&format!("  dry run: {cmd}"));
     match exec::sh(&cmd) {
         Ok(out) => {
@@ -103,13 +91,27 @@ fn dry_run(entry: &mut Entry) {
     }
 }
 
+/// The item's dry_run command, with the placeholders filled.
+fn dry_run_command(source: &Source) -> Result<Option<String>> {
+    match source {
+        Source::Target(t) => Ok(t.dry_run.clone()),
+        Source::Worktree {
+            wt, rule, captures, ..
+        } => rule
+            .dry_run
+            .as_deref()
+            .map(|t| worktree::fill(t, &worktree::vars(wt, captures)))
+            .transpose(),
+        Source::None => Ok(None),
+    }
+}
+
 fn clean(entry: &mut Entry, config: &Config, home: &Path) {
     // Check again just before cleaning: things change during a long run.
     match &mut entry.source {
         Source::Target(t) => {
-            if let Some(reason) = survey::target_blocker(t, home) {
-                entry.item.skip(reason);
-                return;
+            if let Some(reason) = target::blocker(t, home) {
+                return entry.item.skip(reason);
             }
         }
         Source::Worktree { wt, .. } => {
@@ -133,32 +135,34 @@ fn clean(entry: &mut Entry, config: &Config, home: &Path) {
         item.name,
         item.path.as_deref().unwrap_or("-")
     ));
-    let Some(cmd) = item.commands.first().cloned() else {
-        return;
-    };
-    let mut ran = vec![cmd.clone()];
-    let result = exec::sh(&cmd);
-    let mut error = match result {
-        Ok(out) if out.status.success() => None,
-        Ok(out) => Some(out.failure()),
-        Err(e) => Some(format!("{e:#}")),
-    };
+    // A clean item has its clean command first, then the branch delete
+    // when the survey planned one.
+    let (remove, delete) = (item.commands[0].clone(), item.commands.get(1).cloned());
+    let mut ran = vec![remove.clone()];
+    let mut error = failure(exec::sh(&remove));
     if error.is_none()
-        && let Source::Worktree {
-            wt,
-            is_default: true,
-            ..
-        } = &entry.source
+        && let Some(delete) = delete
+        && let Source::Worktree { wt, .. } = &entry.source
         && let Some(branch) = &wt.branch
     {
-        error = delete_branch(&wt.repo, branch, config.worktrees.delete_branch, &mut ran)
-            .err()
-            .map(|e| format!("worktree removed, but the branch was not deleted: {e}"));
+        let allowed = match config.worktrees.delete_branch {
+            DeleteBranch::Pushed => on_remote(&wt.repo, branch),
+            _ => Ok(true),
+        };
+        error = match allowed {
+            Ok(false) => None,
+            Ok(true) => {
+                ran.push(delete.clone());
+                failure(exec::sh(&delete))
+            }
+            Err(e) => Some(e),
+        }
+        .map(|e| format!("worktree removed, but the branch was not deleted: {e}"));
     }
 
     // A failed measurement leaves freed_bytes unknown; a path that is gone is 0.
     let after = match (&entry.source, &item.path) {
-        (Source::Target(t), None) => survey::measure_target(t, home).ok().flatten(),
+        (Source::Target(t), None) => target::measure(t, home).ok().flatten(),
         (_, Some(p)) if std::fs::symlink_metadata(p).is_err() => Some(0),
         (_, Some(p)) => size::du(Path::new(p)),
         (_, None) => None,
@@ -176,32 +180,21 @@ fn clean(entry: &mut Entry, config: &Config, home: &Path) {
     item.error = error;
 }
 
-fn delete_branch(
-    repo: &Path,
-    branch: &str,
-    policy: DeleteBranch,
-    ran: &mut Vec<String>,
-) -> Result<(), String> {
-    let repo_s = repo.to_string_lossy();
-    if policy == DeleteBranch::Never {
-        return Ok(());
+/// The error text of a command that did not succeed.
+fn failure(result: Result<exec::Output>) -> Option<String> {
+    match result {
+        Ok(out) if out.status.success() => None,
+        Ok(out) => Some(out.failure()),
+        Err(e) => Some(format!("{e:#}")),
     }
-    if policy == DeleteBranch::Pushed {
-        let out = exec::run(&["git", "-C", &repo_s, "branch", "-r", "--contains", branch])
-            .map_err(|e| format!("{e:#}"))?;
-        if !out.status.success() {
-            return Err(out.failure());
-        }
-        if out.stdout.trim().is_empty() {
-            return Ok(());
-        }
-    }
-    ran.push(survey::branch_delete(repo, branch));
-    let out =
-        exec::run(&["git", "-C", &repo_s, "branch", "-D", branch]).map_err(|e| format!("{e:#}"))?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(out.failure())
+}
+
+/// True when a remote branch contains the branch's last commit.
+fn on_remote(repo: &Path, branch: &str) -> Result<bool, String> {
+    let repo = repo.to_string_lossy();
+    match exec::run(&["git", "-C", &repo, "branch", "-r", "--contains", branch]) {
+        Ok(out) if out.status.success() => Ok(!out.stdout.trim().is_empty()),
+        Ok(out) => Err(out.failure()),
+        Err(e) => Err(format!("{e:#}")),
     }
 }
