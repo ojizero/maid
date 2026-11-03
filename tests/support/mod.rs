@@ -17,8 +17,6 @@
 //!
 //! Set MAID_KEEP_SANDBOX=1 to keep the folder after the test.
 
-#![allow(dead_code)] // each test crate uses a different part of this module
-
 use std::ffi::OsStr;
 use std::fmt;
 use std::fs;
@@ -326,8 +324,8 @@ esac
     }
 
     /// Assert that the fake tools got exactly these calls, in any order.
-    pub fn assert_calls(&self, expected: Vec<String>) {
-        let (calls, mut expected) = (self.calls(), expected);
+    pub fn assert_calls(&self, mut expected: Vec<String>) {
+        let calls = self.calls();
         expected.sort();
         let missing: Vec<_> = expected.iter().filter(|c| !calls.contains(c)).collect();
         let extra: Vec<_> = calls.iter().filter(|c| !expected.contains(c)).collect();

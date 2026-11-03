@@ -28,10 +28,6 @@ fn survey_calls() -> Vec<String> {
     .to_vec()
 }
 
-fn strings(calls: &[&str]) -> impl Iterator<Item = String> {
-    calls.iter().map(|c| c.to_string())
-}
-
 #[test]
 fn cleanup_removes_only_what_is_safe() {
     let sb = Sandbox::new("cleanup");
@@ -79,17 +75,20 @@ fn cleanup_removes_only_what_is_safe() {
     let list = format!("wt -C {main} list --format=json");
     let mut expected = survey_calls();
     // skip_if_running is checked again just before each clean.
-    expected.extend(strings(&[
-        "pgrep -x brew",
-        "brew cleanup --prune=all",
-        "pgrep -x npm",
-        "npm cache clean --force",
-        "pgrep -x uv",
-        "uv cache clean",
-        // wt remove looks for a git fsmonitor daemon.
-        "pgrep -f git fsmonitor--daemon",
-        "pgrep -f git fsmonitor--daemon",
-    ]));
+    expected.extend(
+        [
+            "pgrep -x brew",
+            "brew cleanup --prune=all",
+            "pgrep -x npm",
+            "npm cache clean --force",
+            "pgrep -x uv",
+            "uv cache clean",
+            // wt remove looks for a git fsmonitor daemon.
+            "pgrep -f git fsmonitor--daemon",
+            "pgrep -f git fsmonitor--daemon",
+        ]
+        .map(String::from),
+    );
     // One list in the survey, then a fresh list before each removal.
     expected.extend([list.clone(), list.clone(), list]);
     expected.extend([remove(&repo.pushed), remove(&repo.local)]);
@@ -131,9 +130,9 @@ fn cleanup_removes_only_what_is_safe() {
         assert_eq!(item["result"], "skipped", "{item}");
         item["reason"].as_str().unwrap().to_string()
     };
-    // The reason for the dirty worktree is checked in
-    // dirty_worktree_reason_names_the_changes.
-    ask(&repo.dirty);
+    // wt reports a merged branch with changes as "behind", not
+    // "integrated". The reason must name the changes, not the state.
+    assert_eq!(ask(&repo.dirty), "has changes: modified");
     assert_eq!(
         ask(&repo.env_file),
         "ignored file is not build output: .env"
@@ -235,23 +234,6 @@ fn survey_writes_the_run_file_and_report_prints_it() {
     assert!(!report.stdout.contains('\x1b'), "{report}");
 }
 
-/// wt reports a merged branch with changes as "behind", not "integrated".
-/// The reason must name the changes, not the state.
-#[test]
-fn dirty_worktree_reason_names_the_changes() {
-    let sb = Sandbox::new("dirty-reason");
-    if !sb.has_wt() {
-        return;
-    }
-    let repo = sb.make_repo();
-    let out = sb.maid(&["survey", "--format", "json"]);
-    assert_eq!(out.code, 0, "{out}");
-    let run = out.json();
-    let dirty = item_at(&run, &repo.dirty);
-    assert_eq!(dirty["decision"], "ask");
-    assert_eq!(dirty["reason"], "has changes: modified");
-}
-
 /// A branch at the same commit as main has wt state "empty": everything
 /// in it is in main, so it passes the integrated check.
 #[test]
@@ -304,7 +286,7 @@ fn only_cleans_the_named_target() {
     }
 
     let mut expected = survey_calls();
-    expected.extend(strings(&["pgrep -x uv", "uv cache clean"]));
+    expected.extend(["pgrep -x uv", "uv cache clean"].map(String::from));
     expected.push(format!("wt -C {} list --format=json", path(&repo.main)));
     sb.assert_calls(expected);
 }
@@ -372,7 +354,7 @@ fn only_keeps_the_skip_reason() {
 #[test]
 fn pgrep_failure_skips_the_target() {
     let sb = Sandbox::new("pgrep-broken");
-    fs::write(sb.root.join("pgrep-broken"), "").unwrap();
+    sb.set("pgrep-broken", &[]);
 
     let out = sb.maid(&["cleanup", "--only", "uv cache", "--format", "json"]);
     assert_eq!(out.code, 0, "{out}");
@@ -428,7 +410,7 @@ fn failed_dry_run_command_exits_1() {
 #[test]
 fn docker_targets_clean_only_when_docker_runs() {
     let sb = Sandbox::new("docker");
-    fs::write(sb.root.join("docker-running"), "").unwrap();
+    sb.set("docker-running", &[]);
 
     let out = sb.maid(&["cleanup", "--format", "json"]);
     assert_eq!(out.code, 0, "{out}");
