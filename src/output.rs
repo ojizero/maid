@@ -1,6 +1,6 @@
 //! Render a run file as text or JSON.
 
-use std::fmt::Write;
+use std::fmt::{self, Write};
 use std::path::Path;
 
 use crate::record::{Command, Decision, Kind, Outcome, Record};
@@ -22,12 +22,21 @@ pub fn render(record: &Record, format: Format, home: &Path) -> String {
     }
 }
 
-pub fn json(record: &Record) -> String {
+fn json(record: &Record) -> String {
     serde_json::to_string_pretty(record).expect("a record is always valid JSON") + "\n"
 }
 
+/// Lines under an item line start here.
+const INDENT: &str = "             ";
+
+fn text(record: &Record, home: &Path, color: bool) -> String {
+    let mut out = String::new();
+    write_text(&mut out, record, home, color).expect("writing to a String cannot fail");
+    out
+}
+
 /// A table: free space, then the items grouped by decision and result.
-pub fn text(record: &Record, home: &Path, color: bool) -> String {
+fn write_text(out: &mut String, record: &Record, home: &Path, color: bool) -> fmt::Result {
     let bold = |s: &str| {
         if color {
             format!("\x1b[1m{s}\x1b[0m")
@@ -42,34 +51,25 @@ pub fn text(record: &Record, home: &Path, color: bool) -> String {
         Command::Cleanup => "cleanup",
     };
 
-    let mut out = String::new();
-    let _ = writeln!(
+    writeln!(
         out,
         "{}",
         bold(&format!(
             "maid {command} on {} at {}",
             record.host, record.finished_at
         ))
-    );
-    let _ = writeln!(
+    )?;
+    writeln!(
         out,
         "Free space: {} before, {} after",
         opt(record.free_bytes_before),
         opt(record.free_bytes_after)
-    );
+    )?;
 
     let mut items: Vec<_> = record.items.iter().collect();
     items.sort_by_key(|i| (i.decision, i.result, std::cmp::Reverse(i.size_bytes)));
-    let mut groups: Vec<((Decision, Outcome), Vec<_>)> = Vec::new();
-    for item in items {
-        let key = (item.decision, item.result);
-        match groups.last_mut() {
-            Some((k, list)) if *k == key => list.push(item),
-            _ => groups.push((key, vec![item])),
-        }
-    }
-
-    for ((decision, result), list) in groups {
+    for list in items.chunk_by(|a, b| (a.decision, a.result) == (b.decision, b.result)) {
+        let (decision, result) = (list[0].decision, list[0].result);
         let total: u64 = list.iter().filter_map(|i| i.size_bytes).sum();
         let freed: u64 = list.iter().filter_map(|i| i.freed_bytes).sum();
         let mut head = format!(
@@ -80,10 +80,10 @@ pub fn text(record: &Record, home: &Path, color: bool) -> String {
             human(total)
         );
         if result == Outcome::Done {
-            let _ = write!(head, ", {} freed", human(freed));
+            write!(head, ", {} freed", human(freed))?;
         }
         head.push(')');
-        let _ = writeln!(out, "\n{}", bold(&head));
+        writeln!(out, "\n{}", bold(&head))?;
         for item in list {
             let kind = match item.kind {
                 Kind::Target => "target",
@@ -97,38 +97,38 @@ pub fn text(record: &Record, home: &Path, color: bool) -> String {
                 .map(|p| sys::tilde(p, home));
             let mut line = format!("  {:>9}  {kind:<8}  {}", opt(item.size_bytes), item.name);
             if let Some(place) = place {
-                let _ = write!(line, "  {place}");
+                write!(line, "  {place}")?;
             }
-            let _ = writeln!(out, "{line}");
+            writeln!(out, "{line}")?;
             if let Some(freed) = item.freed_bytes {
-                let _ = writeln!(out, "             freed {}", human(freed));
+                writeln!(out, "{INDENT}freed {}", human(freed))?;
             }
             if let Some(reason) = &item.reason {
-                let _ = writeln!(out, "             {reason}");
+                writeln!(out, "{INDENT}{reason}")?;
             }
             if matches!(result, Outcome::Planned | Outcome::Done | Outcome::Failed) {
                 for cmd in &item.commands {
-                    let _ = writeln!(out, "             $ {cmd}");
+                    writeln!(out, "{INDENT}$ {cmd}")?;
                 }
             }
             if let Some(error) = &item.error {
                 for line in error.lines() {
-                    let _ = writeln!(out, "             ! {line}");
+                    writeln!(out, "{INDENT}! {line}")?;
                 }
             }
         }
     }
     if !record.warnings.is_empty() {
-        let _ = writeln!(
+        writeln!(
             out,
             "\n{}",
             bold(&format!("Warnings ({})", record.warnings.len()))
-        );
+        )?;
         for w in &record.warnings {
-            let _ = writeln!(out, "  {w}");
+            writeln!(out, "  {w}")?;
         }
     }
-    out
+    Ok(())
 }
 
 fn label(d: Decision) -> &'static str {
