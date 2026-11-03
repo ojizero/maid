@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, bail};
 
 /// Tests set this to measure free space on a folder in their sandbox.
-pub const VOLUME_ENV: &str = "MAID_TEST_VOLUME";
+const VOLUME_ENV: &str = "MAID_TEST_VOLUME";
 
 pub fn home() -> Result<PathBuf> {
     match std::env::var_os("HOME") {
@@ -19,10 +19,12 @@ pub fn home() -> Result<PathBuf> {
 
 /// `~` or `~/x` becomes a path under HOME. Other paths do not change.
 pub fn expand(path: &str, home: &Path) -> PathBuf {
-    match path.strip_prefix('~') {
-        Some("") => home.to_path_buf(),
-        Some(rest) if rest.starts_with('/') => home.join(&rest[1..]),
-        _ => PathBuf::from(path),
+    if path == "~" {
+        return home.to_path_buf();
+    }
+    match path.strip_prefix("~/") {
+        Some(rest) => home.join(rest),
+        None => PathBuf::from(path),
     }
 }
 
@@ -76,11 +78,11 @@ pub fn hostname() -> String {
     if unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) } != 0 {
         return "unknown".into();
     }
-    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-    let name = String::from_utf8_lossy(&buf[..end]).into_owned();
-    name.strip_suffix(".local")
-        .map(str::to_string)
-        .unwrap_or(name)
+    let Ok(name) = std::ffi::CStr::from_bytes_until_nul(&buf) else {
+        return "unknown".into();
+    };
+    let name = name.to_string_lossy();
+    name.strip_suffix(".local").unwrap_or(&name).to_string()
 }
 
 /// The current UTC time as RFC 3339, for example `2026-11-03T09:15:00Z`.

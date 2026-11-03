@@ -1,4 +1,4 @@
-//! Parse and format sizes.
+//! Parse, format and measure sizes.
 
 use std::path::Path;
 
