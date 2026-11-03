@@ -91,7 +91,8 @@ is reported as a skipped `ask` item.
 A worktree with action `clean` is removed only when all of these are true.
 These checks are in the code, not in the config:
 
-1. `wt` says its state is `integrated`.
+1. `wt` says its state is `integrated`, or `empty` (the same commit as
+   the default branch).
 2. It has no staged, modified, untracked, renamed, deleted or conflicted
    files.
 3. Every ignored file (`git status --porcelain --ignored`) is inside a

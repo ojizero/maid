@@ -252,10 +252,10 @@ fn dirty_worktree_reason_names_the_changes() {
     assert_eq!(dirty["reason"], "has changes: modified");
 }
 
-/// A branch at the same commit as main has wt state "empty". It can be a
-/// worktree made a moment ago for new work, so maid asks.
+/// A branch at the same commit as main has wt state "empty": everything
+/// in it is in main, so it passes the integrated check.
 #[test]
-fn worktree_at_main_goes_to_ask() {
+fn worktree_at_main_is_cleaned() {
     let sb = Sandbox::new("empty");
     if !sb.has_wt() {
         return;
@@ -271,8 +271,8 @@ fn worktree_at_main_goes_to_ask() {
     assert_eq!(out.code, 0, "{out}");
     let run = out.json();
     let item = item_at(&run, &fresh);
-    assert_eq!(item["decision"], "ask", "{item}");
-    assert_eq!(item["reason"], "not integrated (state: empty)");
+    assert_eq!(item["decision"], "clean", "{item}");
+    assert!(item["commands"][0].as_str().unwrap().contains("remove"));
 }
 
 #[test]

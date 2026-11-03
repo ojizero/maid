@@ -142,7 +142,8 @@ why    = "installed runtimes; mise prune also uninstalls versions in use elsewhe
 # then runs wt list to get every worktree of that repo, wherever it lives.
 #
 # The code always runs 3 checks before it removes a worktree:
-#   integrated, no changes, ignored files are only build output.
+#   integrated (or at the default branch's commit), no changes, ignored
+#   files are only build output.
 # If one check fails, the worktree goes to Ask.
 #
 # `--only worktree` selects the worktrees that no override matches.

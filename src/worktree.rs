@@ -296,8 +296,9 @@ pub fn check_state(wt: &Worktree) -> Result<(), String> {
     }
     // Changes first: wt does not call a branch with changes "integrated",
     // and "has changes" is the more useful reason.
+    // "empty" is a branch at the same commit as the default branch.
     match wt.state.as_deref() {
-        Some("integrated") => Ok(()),
+        Some("integrated" | "empty") => Ok(()),
         Some(state) => Err(format!("not integrated (state: {state})")),
         None => Err("not integrated (no state)".into()),
     }
@@ -434,6 +435,7 @@ mod tests {
                 "api.chore-docs",
                 "api.feat-billing-ids",
                 "api.fix-log-filter",
+                "api.chore-bump",
                 "base"
             ]
         );
