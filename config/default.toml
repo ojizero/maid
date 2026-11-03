@@ -1,17 +1,18 @@
 # maid config.
-# maid ships these defaults inside the binary. The user file
-# ($XDG_CONFIG_HOME/maid/config.toml, else ~/.config/maid/config.toml,
-# or the file given with -c) adds to them:
-#   - a [[target]] with the same name as a default replaces it;
-#     a new name adds a target.
-#   - keys in [worktrees] replace the default keys.
-#   - [[worktrees.override]] entries from the user file are checked
-#     before the default ones. The first match wins.
-# Unknown keys and bad values are errors.
+# `maid init` writes this file to $XDG_CONFIG_HOME/maid/config.toml
+# (else ~/.config/maid/config.toml, or the file given with -c).
+# It adds each known target whose `needs` programs are on PATH.
+# This file is the whole config: maid does not add defaults to it.
+# Remove a target to stop maid from measuring it.
+# Unknown keys and bad values are errors. `maid doctor` checks this file.
 
 # ── Targets ──────────────────────────────────────────────────────
 # A target is one thing on disk that maid measures and maybe cleans.
 #   name             what the report calls it; --only selects by name
+#   needs            optional: the programs that the target uses, or [] for
+#                    none. `maid init` adds a known target only when all are
+#                    on PATH. `maid doctor` fails when one is missing, and
+#                    warns when a target has no needs.
 #   action           "clean" or "keep"
 #   path             a folder; survey measures it with du -skx
 #   size             or: a command that prints a size, for example "17.3GB"
@@ -27,10 +28,9 @@
 # does not exist or is a symlink is skipped. skip_if_running and only_if are checked
 # in survey and again just before clean runs.
 
-# Package caches
-
 [[target]]
 name            = "Homebrew cache"
+needs           = ["brew"]
 action          = "clean"
 path            = "~/Library/Caches/Homebrew"
 dry_run         = "brew cleanup --prune=all --dry-run"
@@ -39,6 +39,7 @@ skip_if_running = ["brew"]
 
 [[target]]
 name            = "uv cache"
+needs           = ["uv"]
 action          = "clean"
 path            = "~/.cache/uv"
 clean           = "uv cache clean"
@@ -46,6 +47,7 @@ skip_if_running = ["uv"]
 
 [[target]]
 name            = "npm cache"
+needs           = ["npm"]
 action          = "clean"
 path            = "~/.npm/_cacache"
 clean           = "npm cache clean --force"
@@ -53,6 +55,7 @@ skip_if_running = ["npm"]
 
 [[target]]
 name            = "pnpm store"
+needs           = ["pnpm"]
 action          = "clean"
 path            = "~/Library/pnpm/store"
 clean           = "pnpm store prune"
@@ -60,6 +63,7 @@ skip_if_running = ["pnpm"]
 
 [[target]]
 name            = "Bun cache"
+needs           = ["bun"]
 action          = "clean"
 path            = "~/.bun/install/cache"
 clean           = "bun pm cache rm -g"
@@ -67,6 +71,7 @@ skip_if_running = ["bun"]
 
 [[target]]
 name            = "Go build cache"
+needs           = ["go"]
 action          = "clean"
 path            = "~/Library/Caches/go-build"
 clean           = "go clean -cache"
@@ -74,15 +79,15 @@ skip_if_running = ["go"]
 
 [[target]]
 name            = "NuGet packages"
+needs           = ["dotnet"]
 action          = "clean"
 path            = "~/.nuget/packages"
 clean           = "dotnet nuget locals all --clear"
 skip_if_running = ["dotnet"]
 
-# Xcode
-
 [[target]]
 name            = "Xcode DerivedData"
+needs           = ["xcrun"]
 action          = "clean"
 path            = "~/Library/Developer/Xcode/DerivedData"
 clean           = "rm -rf ~/Library/Developer/Xcode/DerivedData/*"
@@ -90,15 +95,15 @@ skip_if_running = ["Xcode", "xcodebuild"]
 
 [[target]]
 name            = "Unavailable simulators"
+needs           = ["xcrun"]
 action          = "clean"
 path            = "~/Library/Developer/CoreSimulator/Devices"
 clean           = "xcrun simctl delete unavailable"
 skip_if_running = ["Simulator"]
 
-# Docker (cleaned only when Docker is already running)
-
 [[target]]
 name    = "Docker images"
+needs   = ["docker"]
 action  = "clean"
 size    = "docker system df --format '{{if eq .Type \"Images\"}}{{.Size}}{{end}}'"
 clean   = "docker image prune --all --force"
@@ -106,6 +111,7 @@ only_if = "docker info"
 
 [[target]]
 name    = "Docker build cache"
+needs   = ["docker"]
 action  = "clean"
 size    = "docker system df --format '{{if eq .Type \"Build Cache\"}}{{.Size}}{{end}}'"
 clean   = "docker builder prune --all --force"
@@ -113,26 +119,28 @@ only_if = "docker info"
 
 [[target]]
 name   = "Docker containers"
+needs  = ["docker"]
 action = "keep"
 size   = "docker system df --format '{{if eq .Type \"Containers\"}}{{.Size}}{{end}}'"
 why    = "stopped containers can hold data"
 
 [[target]]
 name   = "Docker volumes"
+needs  = ["docker"]
 action = "keep"
 size   = "docker system df --format '{{if eq .Type \"Local Volumes\"}}{{.Size}}{{end}}'"
 why    = "database and app data"
 
-# Installed tools that live in cache folders
-
 [[target]]
 name   = "Playwright browsers"
+needs  = []
 action = "keep"
 path   = "~/Library/Caches/ms-playwright"
 why    = "installed browsers that tests use"
 
 [[target]]
 name   = "mise tools"
+needs  = ["mise"]
 action = "keep"
 path   = "~/.local/share/mise/installs"
 why    = "installed runtimes; mise prune also uninstalls versions in use elsewhere"

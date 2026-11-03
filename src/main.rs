@@ -3,7 +3,9 @@
 mod app;
 mod cleanup;
 mod config;
+mod doctor;
 mod exec;
+mod init;
 mod output;
 mod par;
 mod record;
@@ -41,11 +43,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Write the default config file. Edit it to change what maid cleans.
+    Init,
+    /// Check the config, the state folder and the programs that maid needs.
+    Doctor,
     /// Measure targets and worktrees and decide what to clean. Changes nothing.
     Survey,
     /// Survey, then run the clean command of each item with decision "clean".
     Cleanup(cleanup::Args),
-    /// Print the last run.
+    /// Print the newest run.
     Report,
 }
 
@@ -63,6 +69,8 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> Result<ExitCode> {
     let app = App::new(cli.config, cli.format)?;
     match cli.command {
+        Command::Init => init::run(&app),
+        Command::Doctor => doctor::run(&app),
         Command::Survey => survey::run(&app),
         Command::Cleanup(args) => cleanup::run(&app, &args),
         Command::Report => report::run(&app),

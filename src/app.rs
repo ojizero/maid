@@ -16,6 +16,8 @@ pub struct App {
     pub format: Format,
     /// The -c file, if given.
     config: Option<PathBuf>,
+    /// The run file of this run.
+    run_file: PathBuf,
 }
 
 impl App {
@@ -23,32 +25,52 @@ impl App {
         if let Format::Html = format {
             return usage(Err(anyhow::anyhow!("html output is not implemented yet")));
         }
+        let home = sys::home()?;
         Ok(App {
-            home: sys::home()?,
+            run_file: record::new_path(&record::dir(&home)),
+            home,
             format,
             config,
         })
     }
 
-    /// The defaults merged with the user file. An error is a usage error.
-    pub fn config(&self) -> Result<Config> {
-        let (path, required) = config::user_path(self.config.as_deref(), &self.home);
-        usage(config::load(&path, required))
+    pub fn config_path(&self) -> PathBuf {
+        config::path(self.config.as_deref(), &self.home)
     }
 
-    pub fn run_file(&self) -> PathBuf {
-        record::path(&self.home)
+    /// The config file, checked. An error is a usage error.
+    pub fn config(&self) -> Result<Config> {
+        usage(config::load(&self.config_path()))
+    }
+
+    pub fn runs_dir(&self) -> PathBuf {
+        record::dir(&self.home)
     }
 
     pub fn print(&self, record: &Record) {
         print!("{}", output::render(record, self.format, &self.home));
     }
 
-    /// Save the run file and print it. Exit code 1 when an item failed.
+    /// Save the run file of this run, and delete old run files.
+    pub fn save(&self, record: &Record) -> Result<()> {
+        record::save(record, &self.run_file)?;
+        if let Err(e) = record::prune(&self.runs_dir()) {
+            eprintln!("maid: warning: {e:#}");
+        }
+        Ok(())
+    }
+
+    /// Save the run file and print it. Exit code 1 when an item failed,
+    /// unless a program in its `needs` was missing.
     pub fn finish(&self, record: Record) -> Result<ExitCode> {
-        record::save(&record, &self.run_file())?;
+        self.save(&record)?;
         self.print(&record);
-        let failed = record.items.iter().any(|i| i.result == Outcome::Failed);
+        // A target that misses a program in `needs` was expected to fail:
+        // the run warns about it, and the item says to run `maid doctor`.
+        let failed = record
+            .items
+            .iter()
+            .any(|i| i.result == Outcome::Failed && i.missing_programs.is_empty());
         Ok(if failed {
             ExitCode::FAILURE
         } else {

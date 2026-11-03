@@ -3,7 +3,7 @@
 use std::fmt::{self, Write};
 use std::path::Path;
 
-use crate::record::{Decision, Kind, Outcome, Record, RunKind};
+use crate::record::{Decision, Kind, Outcome, Record};
 use crate::size::human;
 use crate::sys;
 
@@ -45,20 +45,18 @@ fn write_text(out: &mut String, record: &Record, home: &Path, color: bool) -> fm
         }
     };
     let opt = |b: Option<u64>| b.map_or("?".into(), human);
-    let command = match record.kind {
-        RunKind::Survey => "survey",
-        RunKind::DryRun => "cleanup --dry-run",
-        RunKind::Cleanup => "cleanup",
-    };
+    let command = record.kind.command();
 
-    writeln!(
-        out,
-        "{}",
-        bold(&format!(
-            "maid {command} on {} at {}",
-            record.host, record.finished_at
-        ))
-    )?;
+    let head = match &record.finished_at {
+        Some(at) => format!("maid {command} on {} at {at}", record.host),
+        None => format!(
+            "maid {command} on {} started at {}, not finished (ran: {})",
+            record.host,
+            record.started_at,
+            crate::record::steps_text(&record.steps)
+        ),
+    };
+    writeln!(out, "{}", bold(&head))?;
     writeln!(
         out,
         "Free space: {} before, {} after",

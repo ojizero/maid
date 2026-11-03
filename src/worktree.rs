@@ -416,7 +416,7 @@ mod tests {
     #[test]
     fn decisions_from_fixture() {
         let home = Path::new("/Users/dev");
-        let cfg = config::load(Path::new("/nonexistent"), false).unwrap();
+        let cfg = config::parse(config::DEFAULTS).unwrap();
         let all = fixture();
         let t3 = find(&all, "/.t3/worktrees/api/t3code-1a2b3c4d");
         let (rule, _) = rule_for(&cfg.worktrees, &t3.path, home);

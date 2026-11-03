@@ -4,8 +4,8 @@
 //! Layout:
 //!   bin/            fake tools and a logging `wt` wrapper, first on PATH
 //!   home/           HOME
-//!   config/         XDG_CONFIG_HOME
-//!   state/          XDG_STATE_HOME (the run file)
+//!   config/         XDG_CONFIG_HOME; holds the default config
+//!   state/          XDG_STATE_HOME (the run files)
 //!   tmp/            TMPDIR
 //!   remote.git      the bare "remote" of the test repo
 //!   gitconfig       GIT_CONFIG_GLOBAL
@@ -14,6 +14,7 @@
 //!   pgrep-broken    when it exists, the fake `pgrep` fails (exit 3)
 //!   fail            fake tool names that fail
 //!   docker-running  when it exists, the fake `docker` works
+//!   mid-run.json    the run file as the fake `uv cache clean` found it
 //!
 //! Set MAID_KEEP_SANDBOX=1 to keep the folder after the test.
 
@@ -29,8 +30,11 @@ use serde_json::Value;
 
 /// Programs that the default targets call. Each fake logs its call.
 const FAKES: &[&str] = &[
-    "brew", "bun", "docker", "dotnet", "go", "npm", "pgrep", "pnpm", "purge", "uv", "xcrun",
+    "brew", "bun", "docker", "dotnet", "go", "mise", "npm", "pgrep", "pnpm", "purge", "uv", "xcrun",
 ];
+
+/// The config that `maid init` writes.
+pub const DEFAULTS: &str = include_str!("../../config/default.toml");
 
 /// Real programs come only from these folders, after the fakes.
 const SYSTEM_PATH: &str = "/usr/bin:/bin";
@@ -97,6 +101,7 @@ impl Sandbox {
         .unwrap();
         sb.install_fakes();
         sb.make_caches();
+        sb.write_config(DEFAULTS);
         sb
     }
 
@@ -120,7 +125,8 @@ case "$name $*" in
   "docker info") test -e "$S/docker-running" ;;
   "docker system df "*) test -e "$S/docker-running" && echo 1.5GB ;;
   "brew cleanup --prune=all") rm -rf "$H/Library/Caches/Homebrew/"* ;;
-  "uv cache clean") rm -rf "$H/.cache/uv/"* ;;
+  "uv cache clean") rm -rf "$H/.cache/uv/"*
+                    cp "$S"/state/maid/runs/*.json "$S/mid-run.json" ;;
   "npm cache clean --force") rm -rf "$H/.npm/_cacache/"* ;;
 esac
 "#,
@@ -309,12 +315,21 @@ esac
         self.git(dir, &["commit", "--quiet", "-m", file]);
     }
 
-    /// Write the user config with mode 0600.
+    pub fn config_file(&self) -> PathBuf {
+        self.root.join("config/maid/config.toml")
+    }
+
+    /// Write the config with mode 0600.
     pub fn write_config(&self, text: &str) -> PathBuf {
-        let file = self.root.join("config/maid/config.toml");
+        let file = self.config_file();
         fs::write(&file, text).unwrap();
         fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
         file
+    }
+
+    /// Add `text` to the end of the default config.
+    pub fn add_config(&self, text: &str) {
+        self.write_config(&format!("{DEFAULTS}\n{text}"));
     }
 
     /// Write one name per line to a sandbox file, for example `running`.
@@ -343,13 +358,25 @@ esac
         calls
     }
 
+    /// The run files, oldest first.
+    pub fn run_files(&self) -> Vec<PathBuf> {
+        let dir = self.root.join("state/maid/runs");
+        let mut files: Vec<PathBuf> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        files.sort();
+        files
+    }
+
+    /// The newest run file.
     pub fn run_file(&self) -> Value {
-        let text = fs::read_to_string(self.root.join("state/maid/run.json")).unwrap();
+        let text = fs::read_to_string(self.run_files().last().unwrap()).unwrap();
         serde_json::from_str(&text).unwrap()
     }
 
     /// Every path in the sandbox, with the size of each file. It leaves out
-    /// what maid and the fakes are expected to write: the run file, the call
+    /// what maid and the fakes are expected to write: the run files, the call
     /// log, and the cache that wt keeps in .git/wt.
     pub fn snapshot(&self) -> Vec<(String, u64)> {
         let mut paths = Vec::new();

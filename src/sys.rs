@@ -2,8 +2,9 @@
 
 use std::ffi::CString;
 use std::io::IsTerminal;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 
@@ -43,6 +44,17 @@ pub fn xdg(var: &str, fallback: &str, home: &Path) -> PathBuf {
         Some(dir) if Path::new(&dir).is_absolute() => PathBuf::from(dir),
         _ => home.join(fallback),
     }
+}
+
+/// The first executable file with this name in a PATH folder.
+pub fn find_program(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(name))
+        .find(|file| {
+            file.metadata()
+                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        })
 }
 
 /// The volume that holds user data. On macOS `/` is the sealed system volume.
@@ -87,10 +99,21 @@ pub fn hostname() -> String {
 
 /// The current UTC time as RFC 3339, for example `2026-11-03T09:15:00Z`.
 pub fn now() -> String {
-    let secs = SystemTime::now()
+    rfc3339(since_epoch().as_secs())
+}
+
+/// The current UTC time for a file name, to the nanosecond, for example
+/// `2026-11-03T091500.123456789Z`. The names sort in time order.
+pub fn stamp() -> String {
+    let t = since_epoch();
+    let time = rfc3339(t.as_secs()).replace(':', "");
+    format!("{}.{:09}Z", time.trim_end_matches('Z'), t.subsec_nanos())
+}
+
+fn since_epoch() -> Duration {
+    SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
-    rfc3339(secs)
+        .unwrap_or_default()
 }
 
 fn rfc3339(secs: u64) -> String {

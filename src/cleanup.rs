@@ -8,7 +8,7 @@ use anyhow::Result;
 
 use crate::app::{App, progress, usage};
 use crate::config::{Config, DeleteBranch};
-use crate::record::{Decision, Outcome, RunKind};
+use crate::record::{Decision, Item, Outcome, RunKind};
 use crate::survey::{self, Entry, Source};
 use crate::{exec, size, target, worktree};
 
@@ -26,28 +26,49 @@ pub struct Args {
 pub fn run(app: &App, args: &Args) -> Result<ExitCode> {
     let config = app.config()?;
     check_only(&config, &args.only)?;
-    let mut survey = survey::survey(&config, &app.home);
-    // A planned item has decision clean and passed its checks in the survey.
-    let planned = survey
-        .entries
-        .iter_mut()
-        .filter(|e| e.item.result == Outcome::Planned);
-    for entry in planned {
-        // A worktree item has the name of its rule, so this matches rules too.
-        if !args.only.is_empty() && !args.only.contains(&entry.item.name) {
-            entry.item.skip("not selected by --only".into());
-        } else if args.dry_run {
-            dry_run(entry);
-        } else {
-            clean(entry, &config, &app.home);
-        }
-    }
     let kind = if args.dry_run {
         RunKind::DryRun
     } else {
         RunKind::Cleanup
     };
-    app.finish(survey.record(kind))
+    let mut survey = survey::survey(&config, &app.home);
+    app.save(&survey.record(kind))?;
+    for i in 0..survey.entries.len() {
+        let entry = &mut survey.entries[i];
+        // A planned item has decision clean and passed its checks in the survey.
+        if entry.item.result != Outcome::Planned {
+            continue;
+        }
+        // A worktree item has the name of its rule, so this matches rules too.
+        if !args.only.is_empty() && !args.only.contains(&entry.item.name) {
+            entry.item.skip("not selected by --only".into());
+            continue;
+        }
+        if args.dry_run {
+            dry_run(entry);
+        } else {
+            clean(entry, &config, &app.home);
+        }
+        hint_doctor(&mut entry.item);
+        // The run file shows each item as soon as it is done.
+        app.save(&survey.record(kind))?;
+    }
+    survey.ran(kind);
+    app.finish(survey.finish(kind))
+}
+
+/// A failure is likely when a program in the target's `needs` is missing.
+fn hint_doctor(item: &mut Item) {
+    if item.result == Outcome::Failed && !item.missing_programs.is_empty() {
+        let hint = format!(
+            "{} not on PATH: run `maid doctor` for details",
+            item.missing_programs.join(", ")
+        );
+        item.error = Some(match item.error.take() {
+            Some(error) => format!("{error}\n{hint}"),
+            None => hint,
+        });
+    }
 }
 
 fn check_only(config: &Config, only: &[String]) -> Result<()> {

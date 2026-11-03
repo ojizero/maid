@@ -11,6 +11,8 @@
 ## Usage
 
 ```
+maid [-c|--config PATH] init
+maid [-c|--config PATH] [-f|--format text|json] doctor
 maid [-c|--config PATH] [-f|--format text|json|html] survey
 maid [-c|--config PATH] [-f|--format text|json|html] cleanup [-n|--dry-run] [--only NAME]...
 maid [-f|--format text|json|html] report
@@ -18,11 +20,13 @@ maid [-f|--format text|json|html] report
 
 `-c` and `-f` can also come after the command. The `html` format is not implemented yet: it fails with exit code 2 before maid does any work.
 
+- `init` writes a config file with the known targets that this computer can use: each target in [`config/default.toml`](config/default.toml) whose `needs` programs are all on PATH. It lists the targets it left out. It does not replace a file that exists.
+- `doctor` checks that maid can run, and that every target in the config is usable. It prints one line for each check: `ok`, `warn` or `FAIL`. It exits with code 1 when a check fails. See [Doctor](#doctor).
 - `survey` measures every target and worktree, finds large folders that nothing covers, and decides what to do with each. It changes nothing.
 - `cleanup` runs a fresh survey, then runs the clean command of each item with decision `clean`, one at a time. Just before each item it checks `skip_if_running`, `only_if` and the worktree checks again. When an item fails, maid records the error and continues. A target whose path is a symlink is skipped. If `pgrep` cannot check a program, the target is skipped.
   - `-n`, `--dry-run`: print each planned command with the current size, and run the item's `dry_run` command if it has one. Changes nothing. A `dry_run` command that fails marks the item `failed` (exit code 1).
   - `--only NAME`: clean only the target or worktree rule with this name. `worktree` selects the worktrees that no override matches. You can give it more than once.
-- `report` prints the last run file.
+- `report` prints the newest run file.
 
 Results go to stdout. Progress and warnings go to stderr. The text output has no color when stdout is not a terminal or `NO_COLOR` is set.
 
@@ -31,24 +35,22 @@ Results go to stdout. Progress and warnings go to stderr. The text output has no
 | Code | Meaning |
 |---|---|
 | 0 | Success, including runs with `ask` items |
-| 1 | Runtime failure, including a cleanup item that failed |
+| 1 | Runtime failure, including a cleanup item that failed or a failed `doctor` check. An item whose `needs` program is missing does not count. |
 | 2 | Usage or config error |
 
 ## Config
 
-maid embeds its defaults: [`config/default.toml`](config/default.toml). The comments in that file describe every field.
+`maid init` writes the config file from [`config/default.toml`](config/default.toml), the known targets. The comments in that file describe every field. A target's `needs` lists the programs it uses, or is `[]` when it uses none. `init` adds a known target only when all of them are on PATH. `needs` is optional in your config, but `doctor` warns about a target without it, because it cannot check that target. It fails when a program in `needs` is missing. `survey` and `cleanup` still measure and clean such a target, and the run gets a warning that tells you to run `maid doctor`. If its command then fails, the item is `failed` with a hint to run `maid doctor`, but the run does not exit with 1 for it. `survey` and `cleanup` need the config file. If it is missing, they stop with exit code 2 and tell you to run `maid init`.
 
-The user file adds to the defaults. maid reads the first of:
+The config file is:
 
-1. the file given with `-c PATH` (it must exist);
-2. `$XDG_CONFIG_HOME/maid/config.toml`;
-3. `~/.config/maid/config.toml`.
+1. the file given with `-c PATH`;
+2. else `$XDG_CONFIG_HOME/maid/config.toml`;
+3. else `~/.config/maid/config.toml`.
 
-If there is no user file, only the defaults apply. The user file must be owned by you and not writable by group or others, because it holds shell commands.
+The file is the whole config. maid does not add its defaults to it, so a target that you remove is not measured. The file must be owned by you and not writable by group or others, because it holds shell commands. `init` writes it with mode 0600.
 
-- A `[[target]]` with the same `name` as a default replaces it. A new name adds a target.
-- Keys in `[worktrees]` replace the default keys.
-- User `[[worktrees.override]]` entries are checked before the default ones. The first match wins.
+`[[worktrees.override]]` entries are checked in order. The first match wins.
 
 Example:
 
@@ -58,10 +60,9 @@ name   = "uv cache"
 action = "keep"
 path   = "~/.cache/uv"
 why    = "I work offline this week"
-
-[worktrees]
-delete_branch = "never"
 ```
+
+This changes the `uv cache` target in the file that `init` wrote.
 
 ## Worktrees
 
@@ -83,15 +84,56 @@ A survey does not change files, with one exception that comes from `wt`: its fir
 
 It does not scan the `$HOME` folders that macOS guards with a permission prompt (`Desktop`, `Documents`, `Downloads`, `Movies`, `Music`, `Pictures`, `.Trash`) or `Library`, `.cache` and `.local` as a whole.
 
-## Run file
+## Doctor
 
-Each run writes `$XDG_STATE_HOME/maid/run.json`, else `~/.local/state/maid/run.json`. maid writes a temp file and renames it, with mode 0600.
+`maid doctor` checks:
+
+| Check | Fails when | Warns when |
+|---|---|---|
+| `config` | the config file is missing or not valid | |
+| `state` | maid cannot write to the run file folder | |
+| `last run` | | the newest run did not finish, or an item failed |
+| `sh`, `du`, `pgrep` | the program is not on PATH | |
+| `target` (one for each target) | a program in its `needs` is not on PATH | it has no `needs` |
+| `git`, `wt` | | the program is not on PATH (only when `repos` is not empty) |
+| `repos` (one for each folder) | | the folder does not exist |
+
+The `last run` line sums up the newest run: items done, space freed, items failed and items to ask about. `-f json` prints the same as JSON:
 
 ```json
 {
-  "version": 1,
+  "ok": true,
+  "checks": [
+    { "level": "ok | warn | fail", "check": "target", "detail": "Homebrew cache" }
+  ],
+  "last_run": {
+    "file": "/Users/me/.local/state/maid/runs/2026-11-03T090040.123456789Z.json",
+    "mode": "cleanup",
+    "steps": ["survey", "cleanup"],
+    "started_at": "2026-11-03T09:00:00Z",
+    "finished_at": "2026-11-03T09:00:40Z",
+    "done": 3,
+    "failed": 0,
+    "ask": 2,
+    "freed_bytes": 8700000000
+  }
+}
+```
+
+`last_run` is `null` when there is no run yet.
+
+## Run files
+
+Each run writes a new file to `$XDG_STATE_HOME/maid/runs/`, else `~/.local/state/maid/runs/`. The file name is the UTC time to the nanosecond, for example `2026-11-03T090040.123456789Z.json`. maid writes a temp file and renames it, with mode 0600. maid keeps the newest 7 run files and deletes the older ones.
+
+maid writes the run file while the run goes on: after the survey, then again after each item that `cleanup` cleans or dry-runs. So a run that was stopped still shows how far it got. `report` and `doctor` say when the newest run did not finish.
+
+```json
+{
+  "version": 2,
   "host": "my-mac",
   "mode": "survey | dry-run | cleanup",
+  "steps": ["survey", "cleanup"],
   "started_at": "2026-11-03T09:00:00Z",
   "finished_at": "2026-11-03T09:00:40Z",
   "free_bytes_before": 150000000000,
@@ -109,14 +151,18 @@ Each run writes `$XDG_STATE_HOME/maid/run.json`, else `~/.local/state/maid/run.j
       "commands": ["uv cache clean"],
       "result": "planned | done | skipped | failed",
       "freed_bytes": null,
-      "error": null
+      "error": null,
+      "missing_programs": []
     }
   ],
   "warnings": []
 }
 ```
 
+- `mode` is the command. `steps` lists the steps that finished, in order: `survey`, then `dry-run` or `cleanup`. A `cleanup` run with `"steps": ["survey"]` was stopped during the cleanup, or is still running.
+- `finished_at` and `free_bytes_after` are `null` until the run finishes.
 - `repo` and `branch` are set for worktrees.
+- `missing_programs` lists the programs in the target's `needs` that were not on PATH. A failed item with missing programs does not set exit code 1.
 - `commands` holds the planned commands, and after a cleanup the commands that ran.
 - `freed_bytes` is the item's size before the clean minus its size after. It is not the change in free space on the disk.
 - Free space is measured with `statvfs` on `/System/Volumes/Data` on macOS (`/` is the sealed system volume there), else on `/`.
@@ -161,7 +207,7 @@ To release:
 mise use 'forgejo:ojizero/maid[api_url=https://forge.ojizero.dev/api/v1]'
 ```
 
-Each command is a module with a `run` function: `survey.rs`, `cleanup.rs` and `report.rs`. A command with flags defines its own clap `Args` there. `app.rs` holds what all commands share: the home folder, the output format, the config, and saving and printing the run file (`record.rs`). To add a command, add its module and one arm in `main.rs`.
+Each command is a module with a `run` function: `init.rs`, `doctor.rs`, `survey.rs`, `cleanup.rs` and `report.rs`. A command with flags defines its own clap `Args` there. `app.rs` holds what all commands share: the home folder, the output format, the config, and saving and printing the run files (`record.rs`). To add a command, add its module and one arm in `main.rs`.
 
 The end-to-end tests run the real binary in a sandbox folder, with fake tools first on `PATH` and real `git` and `wt`. They set `MAID_TEST_VOLUME` to measure free space on the sandbox folder. Only tests use this variable.
 

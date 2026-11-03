@@ -8,7 +8,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use serde_json::json;
-use support::{Sandbox, is_empty_dir, item_at, item_named, path};
+use support::{DEFAULTS, Sandbox, is_empty_dir, item_at, item_named, path};
 
 /// The calls that every survey makes when Docker does not run and no
 /// program runs: size commands, only_if and skip_if_running checks.
@@ -96,6 +96,8 @@ fn cleanup_removes_only_what_is_safe() {
 
     // The run.
     assert_eq!(run["mode"], "cleanup");
+    assert_eq!(run["steps"], json!(["survey", "cleanup"]));
+    assert!(run["finished_at"].is_string());
     assert_eq!(run["warnings"], json!([]));
     assert!(run["free_bytes_before"].as_u64().is_some());
     assert_eq!(sb.run_file(), run);
@@ -190,6 +192,7 @@ fn dry_run_changes_nothing() {
 
     let run = out.json();
     assert_eq!(run["mode"], "dry-run");
+    assert_eq!(run["steps"], json!(["survey", "dry-run"]));
     assert_eq!(item_at(&run, &repo.pushed)["result"], "planned");
     assert_eq!(item_named(&run, "Homebrew cache")["result"], "planned");
     assert_eq!(sb.run_file(), run);
@@ -209,6 +212,7 @@ fn survey_writes_the_run_file_and_report_prints_it() {
     assert_eq!(sb.snapshot(), before);
     let run = out.json();
     assert_eq!(run["mode"], "survey");
+    assert_eq!(run["steps"], json!(["survey"]));
     assert_eq!(item_at(&run, &repo.pushed)["result"], "planned");
     assert_eq!(item_at(&run, &repo.dirty)["decision"], "ask");
     assert_eq!(sb.run_file(), run);
@@ -370,6 +374,36 @@ fn pgrep_failure_skips_the_target() {
     assert!(!sb.calls().contains(&"uv cache clean".to_string()));
 }
 
+/// maid still tries a target whose program is missing. Its failure is
+/// reported with a hint to run doctor, but does not fail the run.
+#[test]
+fn missing_program_failure_does_not_fail_the_run() {
+    let sb = Sandbox::new("missing-program");
+    fs::remove_file(sb.root.join("bin/uv")).unwrap();
+
+    let out = sb.maid(&["cleanup", "--format", "json"]);
+    assert_eq!(out.code, 0, "{out}");
+    let run = out.json();
+    let uv = item_named(&run, "uv cache");
+    assert_eq!(uv["result"], "failed", "{uv}");
+    assert_eq!(uv["missing_programs"], json!(["uv"]), "{uv}");
+    assert!(uv["size_bytes"].as_u64().is_some(), "{uv}");
+    let error = uv["error"].as_str().unwrap();
+    assert!(
+        error.ends_with("uv not on PATH: run `maid doctor` for details"),
+        "{error}"
+    );
+    assert!(
+        run["warnings"].as_array().unwrap().contains(&json!(
+            "uv cache: uv not on PATH (run `maid doctor` for details)"
+        )),
+        "{run}"
+    );
+    assert!(!is_empty_dir(&sb.home.join(".cache/uv")));
+    assert_eq!(item_named(&run, "npm cache")["result"], "done");
+    assert_eq!(item_named(&run, "npm cache")["missing_programs"], json!([]));
+}
+
 #[test]
 fn symlinked_target_path_is_not_cleaned() {
     let sb = Sandbox::new("symlink");
@@ -467,7 +501,7 @@ fn assert_fails(out: &support::MaidOutput, code: i32, message: &str) {
 #[test]
 fn unknown_config_key_is_a_usage_error() {
     let sb = Sandbox::new("bad-key");
-    sb.write_config(
+    sb.add_config(
         "[[target]]\nname = \"x\"\naction = \"keep\"\npath = \"~/x\"\nwhy = \"y\"\ncolour = \"red\"\n",
     );
     assert_fails(&sb.maid(&["survey"]), 2, "unknown field `colour`");
@@ -477,8 +511,7 @@ fn unknown_config_key_is_a_usage_error() {
 #[test]
 fn writable_config_is_refused() {
     let sb = Sandbox::new("writable");
-    let file = sb.write_config("");
-    fs::set_permissions(&file, fs::Permissions::from_mode(0o620)).unwrap();
+    fs::set_permissions(sb.config_file(), fs::Permissions::from_mode(0o620)).unwrap();
     assert_fails(
         &sb.maid(&["survey"]),
         2,
@@ -493,7 +526,7 @@ fn missing_config_flag_file_is_a_usage_error() {
     assert_fails(
         &sb.maid(&["-c", path(&missing), "survey"]),
         2,
-        "cannot read config",
+        "run `maid init`",
     );
 }
 
@@ -548,12 +581,12 @@ fn report_errors() {
 }
 
 #[test]
-fn user_config_adds_a_target() {
-    let sb = Sandbox::new("user-target");
+fn added_target_is_cleaned() {
+    let sb = Sandbox::new("added-target");
     let cache = sb.home.join("scratch");
     fs::create_dir_all(&cache).unwrap();
     fs::write(cache.join("f"), "x").unwrap();
-    sb.write_config(
+    sb.add_config(
         "[[target]]\nname = \"Scratch\"\naction = \"clean\"\npath = \"~/scratch\"\n\
          clean = \"purge scratch\"\n",
     );
@@ -565,6 +598,152 @@ fn user_config_adds_a_target() {
     assert_eq!(item["result"], "done");
     assert_eq!(item["commands"], json!(["purge scratch"]));
     assert!(sb.calls().contains(&"purge scratch".to_string()));
+}
+
+#[test]
+fn init_writes_the_config_that_survey_needs() {
+    let sb = Sandbox::new("init");
+    fs::remove_file(sb.config_file()).unwrap();
+    assert_fails(&sb.maid(&["survey"]), 2, "run `maid init`");
+    assert!(sb.calls().is_empty());
+
+    let out = sb.maid(&["init"]);
+    assert_eq!(out.code, 0, "{out}");
+    assert_eq!(fs::read_to_string(sb.config_file()).unwrap(), DEFAULTS);
+    let mode = fs::metadata(sb.config_file()).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o600);
+
+    assert_fails(&sb.maid(&["init"]), 2, "exists already");
+    assert_eq!(sb.maid(&["survey"]).code, 0);
+}
+
+/// Every fake is on PATH, so init above adds every known target. Here
+/// bun is missing, so init leaves out the Bun target.
+#[test]
+fn init_leaves_out_targets_whose_program_is_missing() {
+    let sb = Sandbox::new("init-detect");
+    fs::remove_file(sb.config_file()).unwrap();
+    fs::remove_file(sb.root.join("bin/bun")).unwrap();
+
+    let out = sb.maid(&["init"]);
+    assert_eq!(out.code, 0, "{out}");
+    assert!(out.stdout.contains("Bun cache (needs bun)"), "{out}");
+    let config = fs::read_to_string(sb.config_file()).unwrap();
+    assert!(!config.contains("Bun cache"), "{config}");
+    assert!(config.contains("Homebrew cache"), "{config}");
+    assert!(config.contains("[worktrees]"), "{config}");
+
+    let doctor = sb.maid(&["doctor"]);
+    assert!(!doctor.stdout.contains("FAIL"), "{doctor}");
+}
+
+#[test]
+fn each_run_has_its_own_file_and_report_prints_the_newest() {
+    let sb = Sandbox::new("runs");
+    let survey = sb.maid(&["survey", "--format", "json"]);
+    let dry_run = sb.maid(&["cleanup", "--dry-run", "--format", "json"]);
+    assert_eq!(dry_run.code, 0, "{dry_run}");
+    assert_eq!(sb.run_files().len(), 2);
+    assert_ne!(survey.json(), dry_run.json());
+
+    let report = sb.maid(&["report", "--format", "json"]);
+    assert_eq!(report.json(), dry_run.json());
+}
+
+/// maid writes the run file during a cleanup, so a stopped run shows how
+/// far it got. The fake `uv cache clean` copies it.
+#[test]
+fn run_file_shows_the_run_so_far() {
+    let sb = Sandbox::new("so-far");
+    let out = sb.maid(&["cleanup", "--format", "json"]);
+    assert_eq!(out.code, 0, "{out}");
+
+    let text = fs::read_to_string(sb.root.join("mid-run.json")).unwrap();
+    let mid: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(mid["mode"], "cleanup");
+    assert_eq!(mid["steps"], json!(["survey"]));
+    assert_eq!(mid["finished_at"], json!(null));
+    assert_eq!(item_named(&mid, "Homebrew cache")["result"], "done");
+    assert_eq!(item_named(&mid, "uv cache")["result"], "planned");
+    assert_eq!(item_named(&out.json(), "uv cache")["result"], "done");
+
+    // A stopped run: report and doctor say it did not finish.
+    fs::write(sb.run_files().last().unwrap(), text).unwrap();
+    let report = sb.maid(&["report"]);
+    assert!(
+        report.stdout.contains("not finished (ran: survey)"),
+        "{report}"
+    );
+    let doctor = sb.maid(&["doctor"]);
+    assert!(doctor.stdout.contains("did not finish"), "{doctor}");
+}
+
+#[test]
+fn doctor_checks_the_config() {
+    let sb = Sandbox::new("doctor");
+    let out = sb.maid(&["doctor"]);
+    assert_eq!(out.code, 0, "{out}");
+    assert!(!out.stdout.contains("FAIL"), "{out}");
+    assert!(out.stdout.contains("ok    config"), "{out}");
+    assert!(out.stdout.contains("ok    last run  none yet"), "{out}");
+
+    assert!(
+        out.stdout.contains("ok    target    Homebrew cache"),
+        "{out}"
+    );
+    assert!(!out.stdout.contains("warn  target"), "{out}");
+
+    // A target without needs is a warning, not a failure.
+    sb.add_config(
+        "[[target]]\nname = \"Scratch\"\naction = \"keep\"\npath = \"~/scratch\"\nwhy = \"mine\"\n",
+    );
+    let out = sb.maid(&["doctor"]);
+    assert_eq!(out.code, 0, "{out}");
+    assert!(
+        out.stdout.contains("warn  target    Scratch: no `needs`"),
+        "{out}"
+    );
+
+    // A target whose program is missing fails.
+    fs::remove_file(sb.root.join("bin/bun")).unwrap();
+    let out = sb.maid(&["doctor"]);
+    assert_eq!(out.code, 1, "{out}");
+    assert!(
+        out.stdout
+            .contains("FAIL  target    Bun cache: bun not on PATH"),
+        "{out}"
+    );
+
+    fs::remove_file(sb.config_file()).unwrap();
+    let out = sb.maid(&["doctor"]);
+    assert_eq!(out.code, 1, "{out}");
+    assert!(out.stdout.contains("FAIL  config"), "{out}");
+    assert!(out.stdout.contains("run `maid init`"), "{out}");
+}
+
+#[test]
+fn doctor_json_has_the_checks_and_the_last_run() {
+    let sb = Sandbox::new("doctor-json");
+    let out = sb.maid(&["doctor", "--format", "json"]);
+    assert_eq!(out.code, 0, "{out}");
+    let health = out.json();
+    assert_eq!(health["ok"], true);
+    assert_eq!(health["last_run"], json!(null));
+    let checks = health["checks"].as_array().unwrap();
+    assert!(checks.contains(&json!({
+        "level": "ok", "check": "target", "detail": "Homebrew cache"
+    })));
+
+    let cleanup = sb.maid(&["cleanup", "--only", "uv cache"]);
+    assert_eq!(cleanup.code, 0, "{cleanup}");
+    let health = sb.maid(&["doctor", "-f", "json"]).json();
+    let last = &health["last_run"];
+    assert_eq!(last["mode"], "cleanup");
+    assert_eq!(last["steps"], json!(["survey", "cleanup"]));
+    assert_eq!(last["done"], 1);
+    assert_eq!(last["failed"], 0);
+    assert!(last["freed_bytes"].as_u64().unwrap() > 0, "{last}");
+    assert!(last["file"].as_str().unwrap().ends_with(".json"));
 }
 
 #[test]

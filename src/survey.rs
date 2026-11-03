@@ -15,7 +15,7 @@ use crate::{exec, par, size, sys, target, unknown};
 
 pub fn run(app: &App) -> Result<ExitCode> {
     let survey = survey(&app.config()?, &app.home);
-    app.finish(survey.record(RunKind::Survey))
+    app.finish(survey.finish(RunKind::Survey))
 }
 
 /// An item and what maid needs to clean it.
@@ -41,6 +41,8 @@ pub struct Survey {
     free_bytes_before: Option<u64>,
     pub entries: Vec<Entry>,
     warnings: Vec<String>,
+    /// The steps that finished. The survey is the first.
+    steps: Vec<RunKind>,
 }
 
 /// Measure every target, worktree and unknown large folder, and decide
@@ -55,23 +57,39 @@ pub fn survey(config: &Config, home: &Path) -> Survey {
         free_bytes_before,
         entries,
         warnings,
+        steps: vec![RunKind::Survey],
     }
 }
 
 impl Survey {
-    /// Measure free space again and make the record of this command.
-    pub fn record(mut self, kind: RunKind) -> Record {
-        let free_bytes_after = free(&mut self.warnings);
+    /// Mark a step after the survey as finished.
+    pub fn ran(&mut self, step: RunKind) {
+        self.steps.push(step);
+    }
+
+    /// The record of a `kind` run that is not finished yet.
+    pub fn record(&self, kind: RunKind) -> Record {
         Record {
-            version: 1,
+            version: 2,
             host: sys::hostname(),
             kind,
-            started_at: self.started_at,
-            finished_at: sys::now(),
+            steps: self.steps.clone(),
+            started_at: self.started_at.clone(),
+            finished_at: None,
             free_bytes_before: self.free_bytes_before,
+            free_bytes_after: None,
+            items: self.entries.iter().map(|e| e.item.clone()).collect(),
+            warnings: self.warnings.clone(),
+        }
+    }
+
+    /// Measure free space again and make the record of the finished run.
+    pub fn finish(mut self, kind: RunKind) -> Record {
+        let free_bytes_after = free(&mut self.warnings);
+        Record {
+            finished_at: Some(sys::now()),
             free_bytes_after,
-            items: self.entries.into_iter().map(|e| e.item).collect(),
-            warnings: self.warnings,
+            ..self.record(kind)
         }
     }
 }
@@ -85,6 +103,19 @@ fn free(warnings: &mut Vec<String>) -> Option<u64> {
 fn survey_entries(config: &Config, home: &Path, warnings: &mut Vec<String>) -> Vec<Entry> {
     progress(&format!("measuring {} targets", config.targets.len()));
     let mut entries = par::map(&config.targets, |t| survey_target(t, home));
+    for t in &config.targets {
+        let missing = t.missing_programs();
+        if !missing.is_empty() {
+            let programs = missing.join(", ");
+            warn(
+                warnings,
+                format!(
+                    "{}: {programs} not on PATH (run `maid doctor` for details)",
+                    t.name
+                ),
+            );
+        }
+    }
     for e in &entries {
         if let Some(err) = &e.item.error {
             warn(warnings, format!("{}: {err}", e.item.name));
@@ -125,6 +156,7 @@ fn survey_target(t: &Target, home: &Path) -> Entry {
         .path
         .as_ref()
         .map(|p| sys::expand(p, home).to_string_lossy().into_owned());
+    item.missing_programs = t.missing_programs().iter().map(|p| p.to_string()).collect();
     match target::measure(t, home) {
         Ok(size) => item.size_bytes = size,
         Err(e) => item.error = Some(format!("{e:#}")),
