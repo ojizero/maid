@@ -12,6 +12,9 @@ env:
 jobs:
   ci:
     runs-on: docker
+    # wt needs git 2.43 or newer; bookworm, the runner's default, has 2.39.
+    container:
+      image: node:22-trixie
     steps:
       - uses: actions/checkout@v4
       - uses: ./.forgejo/actions/mise

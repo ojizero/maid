@@ -68,7 +68,7 @@ This changes the `uv cache` target in the file that `init` wrote.
 
 ## Worktrees
 
-maid finds main checkouts (folders with a `.git` folder, up to 4 levels deep) in each `[worktrees].repos` folder. For each one it runs `wt -C <repo> list --format=json`. If `wt` is missing or fails, the repo is reported as a skipped `ask` item.
+maid finds main checkouts (folders with a `.git` folder, up to 4 levels deep) in each `[worktrees].repos` folder. For each one it runs `wt -C <repo> list --format=json`. If `wt` is missing or fails, the repo is reported as a skipped `ask` item. `wt` needs git 2.43 or newer: with an older git, every repo is skipped.
 
 A worktree with action `clean` is removed only when all of these are true. These checks are in the code, not in the config:
 
