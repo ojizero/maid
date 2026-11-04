@@ -13,6 +13,9 @@ jobs:
     # The dist task cross-links with zig, which fails at random on the
     # Linux 4.4 kernel of the `docker` runner (no statx).
     runs-on: sagittarius-a
+    # wt needs git 2.43 or newer; bookworm, the runner's default, has 2.39.
+    container:
+      image: node:22-trixie
     steps:
       - uses: actions/checkout@v4
       - uses: ./.forgejo/actions/mise
