@@ -11,7 +11,8 @@ use serde_json::json;
 use support::{DEFAULTS, Sandbox, is_empty_dir, item_at, item_named, path};
 
 /// The calls that every survey makes when Docker does not run and no
-/// program runs: size commands, only_if and skip_if_running checks.
+/// program runs: size and locate commands, only_if and skip_if_running
+/// checks.
 fn survey_calls() -> Vec<String> {
     [
         r#"docker system df --format {{if eq .Type "Build Cache"}}{{.Size}}{{end}}"#,
@@ -20,6 +21,11 @@ fn survey_calls() -> Vec<String> {
         r#"docker system df --format {{if eq .Type "Local Volumes"}}{{.Size}}{{end}}"#,
         "docker info",
         "docker info",
+        "brew --cache",
+        "go env GOCACHE",
+        "npm config get cache",
+        "pnpm store path",
+        "uv cache dir",
         "pgrep -x brew",
         "pgrep -x npm",
         "pgrep -x uv",
@@ -332,7 +338,8 @@ fn skip_if_running_skips_the_target() {
     assert_eq!(item_named(&run, "uv cache")["result"], "done");
 
     let calls = sb.calls();
-    assert!(!calls.iter().any(|c| c.starts_with("brew")), "{calls:?}");
+    let brew: Vec<_> = calls.iter().filter(|c| c.starts_with("brew")).collect();
+    assert_eq!(brew, ["brew --cache"], "{calls:?}");
     assert!(calls.contains(&"uv cache clean".to_string()), "{calls:?}");
 }
 
@@ -379,6 +386,11 @@ fn pgrep_failure_skips_the_target() {
 #[test]
 fn missing_program_failure_does_not_fail_the_run() {
     let sb = Sandbox::new("missing-program");
+    // A fixed path, so maid gets to the clean command.
+    sb.write_config(&DEFAULTS.replace(
+        r#"locate          = "uv cache dir""#,
+        r#"path = "~/.cache/uv""#,
+    ));
     fs::remove_file(sb.root.join("bin/uv")).unwrap();
 
     let out = sb.maid(&["cleanup", "--format", "json"]);
@@ -402,6 +414,29 @@ fn missing_program_failure_does_not_fail_the_run() {
     assert!(!is_empty_dir(&sb.home.join(".cache/uv")));
     assert_eq!(item_named(&run, "npm cache")["result"], "done");
     assert_eq!(item_named(&run, "npm cache")["missing_programs"], json!([]));
+}
+
+/// A target whose locate command fails is skipped, and its clean command
+/// does not run.
+#[test]
+fn failed_locate_skips_the_target() {
+    let sb = Sandbox::new("missing-locate");
+    fs::remove_file(sb.root.join("bin/uv")).unwrap();
+
+    let out = sb.maid(&["cleanup", "--format", "json"]);
+    assert_eq!(out.code, 0, "{out}");
+    let run = out.json();
+    let uv = item_named(&run, "uv cache");
+    assert_eq!(uv["result"], "skipped", "{uv}");
+    assert_eq!(uv["path"], json!(null), "{uv}");
+    assert_eq!(uv["reason"], "locate failed", "{uv}");
+    let error = uv["error"].as_str().unwrap();
+    assert!(
+        error.starts_with(r#"locate "uv cache dir" failed: "#),
+        "{error}"
+    );
+    assert!(!is_empty_dir(&sb.home.join(".cache/uv")));
+    assert_eq!(item_named(&run, "npm cache")["result"], "done");
 }
 
 #[test]

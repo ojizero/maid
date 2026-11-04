@@ -47,7 +47,7 @@ pub fn run(app: &App, args: &Args) -> Result<ExitCode> {
         if args.dry_run {
             dry_run(entry);
         } else {
-            clean(entry, &config, &app.home);
+            clean(entry, &config);
         }
         hint_doctor(&mut entry.item);
         // The run file shows each item as soon as it is done.
@@ -127,11 +127,12 @@ fn dry_run_command(source: &Source) -> Result<Option<String>> {
     }
 }
 
-fn clean(entry: &mut Entry, config: &Config, home: &Path) {
+fn clean(entry: &mut Entry, config: &Config) {
     // Check again just before cleaning: things change during a long run.
     match &mut entry.source {
         Source::Target(t) => {
-            if let Some(reason) = target::blocker(t, home) {
+            let path = entry.item.path.as_deref().map(Path::new);
+            if let Some(reason) = target::blocker(t, path) {
                 return entry.item.skip(reason);
             }
         }
@@ -183,7 +184,7 @@ fn clean(entry: &mut Entry, config: &Config, home: &Path) {
 
     // A failed measurement leaves freed_bytes unknown; a path that is gone is 0.
     let after = match (&entry.source, &item.path) {
-        (Source::Target(t), None) => target::measure(t, home).ok().flatten(),
+        (Source::Target(t), None) => target::measure(t, None).ok().flatten(),
         (_, Some(p)) if std::fs::symlink_metadata(p).is_err() => Some(0),
         (_, Some(p)) => size::du(Path::new(p)),
         (_, None) => None,

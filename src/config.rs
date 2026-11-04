@@ -33,6 +33,9 @@ pub struct Target {
     pub needs: Option<Vec<String>>,
     pub action: Action,
     pub path: Option<String>,
+    /// A command that prints the path, for tools whose folder differs per
+    /// platform or setting.
+    pub locate: Option<String>,
     pub size: Option<String>,
     pub dry_run: Option<String>,
     pub clean: Option<String>,
@@ -158,8 +161,9 @@ fn validate(config: &Config) -> Result<()> {
         }
         let what = format!("target {:?}", t.name);
         check_action(&what, t.action, t.clean.as_deref(), t.why.as_deref())?;
-        if t.path.is_some() == t.size.is_some() {
-            bail!("{what}: set exactly one of path and size");
+        let set = [&t.path, &t.locate, &t.size];
+        if set.iter().filter(|f| f.is_some()).count() != 1 {
+            bail!("{what}: set exactly one of path, locate and size");
         }
     }
     let w = &config.worktrees;
@@ -289,7 +293,11 @@ mod tests {
         assert!(err_with("[[target]]\nname='x'\naction='keep'\npath='/x'").contains("needs why"));
         assert!(
             err_with("[[target]]\nname='x'\naction='keep'\nwhy='y'")
-                .contains("exactly one of path and size")
+                .contains("exactly one of path, locate and size")
+        );
+        assert!(
+            err_with("[[target]]\nname='x'\naction='keep'\nwhy='y'\npath='/x'\nlocate='echo /x'")
+                .contains("exactly one")
         );
         assert!(
             err_with("[[target]]\nname='x'\naction='keep'\nwhy='y'\npath='/x'\nsize='echo 1GB'")

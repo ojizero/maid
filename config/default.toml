@@ -15,9 +15,13 @@
 #                    warns when a target has no needs.
 #   action           "clean" or "keep"
 #   path             a folder; survey measures it with du -skx
+#   locate           or: a command that prints the folder, for a tool that
+#                    keeps it in a different place per platform or setting.
+#                    Survey runs it each time. If it fails, the target is
+#                    skipped.
 #   size             or: a command that prints a size, for example "17.3GB"
 #                    (decimal units as Docker prints them; empty = unknown)
-#                    A target has exactly one of path and size.
+#                    A target has exactly one of path, locate and size.
 #   dry_run          optional: a command that shows what clean would remove
 #   clean            the command that frees it (action = "clean" only)
 #   skip_if_running  do not clean while one of these programs runs
@@ -32,7 +36,7 @@
 name            = "Homebrew cache"
 needs           = ["brew"]
 action          = "clean"
-path            = "~/Library/Caches/Homebrew"
+locate          = "brew --cache"
 dry_run         = "brew cleanup --prune=all --dry-run"
 clean           = "brew cleanup --prune=all"
 skip_if_running = ["brew"]
@@ -41,7 +45,7 @@ skip_if_running = ["brew"]
 name            = "uv cache"
 needs           = ["uv"]
 action          = "clean"
-path            = "~/.cache/uv"
+locate          = "uv cache dir"
 clean           = "uv cache clean"
 skip_if_running = ["uv"]
 
@@ -49,7 +53,7 @@ skip_if_running = ["uv"]
 name            = "npm cache"
 needs           = ["npm"]
 action          = "clean"
-path            = "~/.npm/_cacache"
+locate          = 'cache=$(npm config get cache) && echo "$cache/_cacache"'
 clean           = "npm cache clean --force"
 skip_if_running = ["npm"]
 
@@ -57,7 +61,7 @@ skip_if_running = ["npm"]
 name            = "pnpm store"
 needs           = ["pnpm"]
 action          = "clean"
-path            = "~/Library/pnpm/store"
+locate          = "pnpm store path"
 clean           = "pnpm store prune"
 skip_if_running = ["pnpm"]
 
@@ -73,7 +77,7 @@ skip_if_running = ["bun"]
 name            = "Go build cache"
 needs           = ["go"]
 action          = "clean"
-path            = "~/Library/Caches/go-build"
+locate          = "go env GOCACHE"
 clean           = "go clean -cache"
 skip_if_running = ["go"]
 

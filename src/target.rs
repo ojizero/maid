@@ -1,16 +1,40 @@
 //! A target: measure it, and check if it can be cleaned now.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 use crate::config::Target;
 use crate::{exec, size, sys};
 
-/// The size in bytes: `du` of the path, or the output of the size command.
-pub fn measure(t: &Target, home: &Path) -> Result<Option<u64>> {
+/// The target's folder: its path, or what its locate command prints.
+/// None for a target that has a size command.
+pub fn locate(t: &Target, home: &Path) -> Result<Option<PathBuf>> {
     if let Some(path) = &t.path {
-        return Ok(size::du(&sys::expand(path, home)));
+        return Ok(Some(sys::expand(path, home)));
+    }
+    let Some(cmd) = &t.locate else {
+        return Ok(None);
+    };
+    let out = exec::sh(cmd).with_context(|| format!("locate {cmd:?}"))?;
+    if !out.status.success() {
+        bail!("locate {cmd:?} failed: {}", out.failure());
+    }
+    let path = sys::expand(out.stdout.trim(), home);
+    if !path.is_absolute() {
+        bail!(
+            "locate {cmd:?} printed {:?}, not an absolute path",
+            out.stdout.trim()
+        );
+    }
+    Ok(Some(path))
+}
+
+/// The size in bytes: `du` of the folder that `locate` found, or the
+/// output of the size command.
+pub fn measure(t: &Target, path: Option<&Path>) -> Result<Option<u64>> {
+    if let Some(path) = path {
+        return Ok(size::du(path));
     }
     let cmd = t.size.as_deref().unwrap_or_default();
     let out = exec::sh(cmd)?;
@@ -21,10 +45,11 @@ pub fn measure(t: &Target, home: &Path) -> Result<Option<u64>> {
     size::parse(&out.stdout).with_context(|| format!("size command {cmd:?}"))
 }
 
-/// The reason not to clean a target now, if there is one.
-pub fn blocker(t: &Target, home: &Path) -> Option<String> {
-    if let Some(path) = &t.path {
-        match std::fs::symlink_metadata(sys::expand(path, home)) {
+/// The reason not to clean a target now, if there is one. `path` is the
+/// folder that `locate` found.
+pub fn blocker(t: &Target, path: Option<&Path>) -> Option<String> {
+    if let Some(path) = path {
+        match std::fs::symlink_metadata(path) {
             Err(_) => return Some("path does not exist".into()),
             // A link can point the clean command somewhere else.
             Ok(meta) if meta.file_type().is_symlink() => return Some("path is a symlink".into()),
@@ -55,4 +80,43 @@ pub fn blocker(t: &Target, home: &Path) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn located(cmd: &str) -> Result<Option<PathBuf>> {
+        let t = Target {
+            name: "x".into(),
+            needs: None,
+            action: crate::config::Action::Keep,
+            path: None,
+            locate: Some(cmd.into()),
+            size: None,
+            dry_run: None,
+            clean: None,
+            skip_if_running: Vec::new(),
+            only_if: None,
+            why: Some("y".into()),
+        };
+        locate(&t, Path::new("/home/me"))
+    }
+
+    #[test]
+    fn locate_runs_the_command() {
+        assert_eq!(located("echo /x/y").unwrap(), Some(PathBuf::from("/x/y")));
+        assert_eq!(
+            located("echo '~/c'").unwrap(),
+            Some(PathBuf::from("/home/me/c"))
+        );
+    }
+
+    #[test]
+    fn locate_fails_without_an_absolute_path() {
+        let err = |cmd| format!("{:#}", located(cmd).unwrap_err());
+        assert!(err("echo oops; exit 3").contains("failed"));
+        assert!(err("echo cache").contains("not an absolute path"));
+        assert!(err("true").contains("not an absolute path"));
+    }
 }

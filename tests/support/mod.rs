@@ -113,6 +113,14 @@ S='{root}'
 H='{home}'
 name=$(basename "$0")
 echo "$name $*" >> "$S/calls.log"
+# Where each tool keeps its cache. These calls do not fail.
+case "$name $*" in
+  "brew --cache") echo "$H/Library/Caches/Homebrew"; exit 0 ;;
+  "uv cache dir") echo "$H/.cache/uv"; exit 0 ;;
+  "npm config get cache") echo "$H/.npm"; exit 0 ;;
+  "pnpm store path") echo "$H/Library/pnpm/store"; exit 0 ;;
+  "go env GOCACHE") echo "$H/Library/Caches/go-build"; exit 0 ;;
+esac
 if grep -qx "$name" "$S/fail" 2>/dev/null; then
   echo "$name: first error line" >&2
   echo "$name: simulated failure" >&2

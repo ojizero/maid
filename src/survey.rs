@@ -163,13 +163,16 @@ fn covered(entries: &[Entry], config: &Config, home: &Path) -> Vec<(PathBuf, Opt
 
 fn survey_target(t: &Target, home: &Path) -> Entry {
     let mut item = Item::new(Kind::Target, &t.name);
-    item.path = t
-        .path
-        .as_ref()
-        .map(|p| sys::expand(p, home).to_string_lossy().into_owned());
     item.missing_programs = t.missing_programs().iter().map(|p| p.to_string()).collect();
-    match target::measure(t, home) {
-        Ok(size) => item.size_bytes = size,
+    let located = target::locate(t, home);
+    match &located {
+        Ok(path) => {
+            item.path = path.as_ref().map(|p| p.to_string_lossy().into_owned());
+            match target::measure(t, path.as_deref()) {
+                Ok(size) => item.size_bytes = size,
+                Err(e) => item.error = Some(format!("{e:#}")),
+            }
+        }
         Err(e) => item.error = Some(format!("{e:#}")),
     }
     match t.action {
@@ -177,7 +180,12 @@ fn survey_target(t: &Target, home: &Path) -> Entry {
         Action::Clean => {
             item.commands = t.clean.iter().cloned().collect();
             item.decide(Decision::Clean, None);
-            if let Some(reason) = target::blocker(t, home) {
+            // The error holds the locate output.
+            let reason = match &located {
+                Ok(path) => target::blocker(t, path.as_deref()),
+                Err(_) => Some("locate failed".into()),
+            };
+            if let Some(reason) = reason {
                 item.skip(reason);
             }
         }

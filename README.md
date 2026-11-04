@@ -40,7 +40,9 @@ Results go to stdout. Progress and warnings go to stderr. The text output has no
 
 ## Config
 
-`maid init` writes the config file from [`config/default.toml`](config/default.toml), the known targets. The comments in that file describe every field. A target's `needs` lists the programs it uses, or is `[]` when it uses none. `init` adds a known target only when all of them are on PATH. `needs` is optional in your config, but `doctor` warns about a target without it, because it cannot check that target. It fails when a program in `needs` is missing. `survey` and `cleanup` still measure and clean such a target, and the run gets a warning that tells you to run `maid doctor`. If its command then fails, the item is `failed` with a hint to run `maid doctor`, but the run does not exit with 1 for it. `survey` and `cleanup` need the config file. If it is missing, they stop with exit code 2 and tell you to run `maid init`.
+`maid init` writes the config file from [`config/default.toml`](config/default.toml), the known targets. The comments in that file describe every field. A target's `needs` lists the programs it uses, or is `[]` when it uses none. `init` adds a known target only when all of them are on PATH. `needs` is optional in your config, but `doctor` warns about a target without it, because it cannot check that target. It fails when a program in `needs` is missing. `survey` and `cleanup` still measure and clean such a target, and the run gets a warning that tells you to run `maid doctor`. If its command then fails, the item is `failed` with a hint to run `maid doctor`, but the run does not exit with 1 for it. A target has one of `path` (a folder), `locate` (a command that prints the folder) or `size` (a command that prints a size). The known targets use `locate` when the tool can print its own folder, for example `uv cache dir` or `brew --cache`, so the same config works on macOS and Linux and follows settings such as `UV_CACHE_DIR`. `survey` runs `locate` each time. If it fails, for example because the program is missing, the target is skipped and its clean command does not run.
+
+`survey` and `cleanup` need the config file. If it is missing, they stop with exit code 2 and tell you to run `maid init`.
 
 The config file is:
 
@@ -58,7 +60,7 @@ Example:
 [[target]]
 name   = "uv cache"
 action = "keep"
-path   = "~/.cache/uv"
+locate = "uv cache dir"
 why    = "I work offline this week"
 ```
 
@@ -211,4 +213,4 @@ Each command is a module with a `run` function: `init.rs`, `doctor.rs`, `survey.
 
 The end-to-end tests run the real binary in a sandbox folder, with fake tools first on `PATH` and real `git` and `wt`. They set `MAID_TEST_VOLUME` to measure free space on the sandbox folder. Only tests use this variable.
 
-macOS is the main platform. The code also builds on Linux, but the defaults are macOS paths.
+macOS is the main platform, and maid also runs on Linux. The Xcode targets are for macOS only: `init` leaves them out where `xcrun` is missing.
