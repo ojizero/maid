@@ -80,7 +80,7 @@ A survey does not change files, with one exception that comes from `wt`: its fir
 
 ## Unknown large folders
 
-`survey` lists folders of 1 GiB or more that no target and no worktree covers. It scans the top-level folders of `$HOME` and the children of `~/Library/Caches`, `~/Library/Developer`, `~/.cache` and `~/.local/share`. The size of a folder does not include the targets and worktrees in it. maid measures with `du -skx`, so it does not read other volumes mounted inside a folder.
+`survey` lists folders of 1 GiB or more that no target, no worktree and no `[worktrees].repos` folder covers. maid does not clean main checkouts, so it does not report the repos folders. It scans the top-level folders of `$HOME` and the children of `~/Library/Caches`, `~/Library/Developer`, `~/.cache` and `~/.local/share`. The size of a folder does not include the targets and worktrees in it. maid measures with `du -skx`, so it does not read other volumes mounted inside a folder.
 
 It does not scan the `$HOME` folders that macOS guards with a permission prompt (`Desktop`, `Documents`, `Downloads`, `Movies`, `Music`, `Pictures`, `.Trash`) or `Library`, `.cache` and `.local` as a whole.
 

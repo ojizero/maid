@@ -130,11 +130,7 @@ fn survey_entries(config: &Config, home: &Path, warnings: &mut Vec<String>) -> V
     entries.extend(skipped);
 
     progress("looking for unknown large folders");
-    let known: Vec<(PathBuf, Option<u64>)> = entries
-        .iter()
-        .filter_map(|e| Some((PathBuf::from(e.item.path.as_ref()?), e.item.size_bytes)))
-        .collect();
-    for found in unknown::scan(home, &known, warnings) {
+    for found in unknown::scan(home, &covered(&entries, config, home), warnings) {
         let mut item = Item::new(Kind::Unknown, "unknown folder");
         item.path = Some(found.path.to_string_lossy().into_owned());
         item.size_bytes = Some(found.size);
@@ -148,6 +144,21 @@ fn survey_entries(config: &Config, home: &Path, warnings: &mut Vec<String>) -> V
         });
     }
     entries
+}
+
+/// The paths that the unknown scan must not report, with their sizes when
+/// known. The repos folders are covered: their worktrees are items, and
+/// maid does not clean the main checkouts.
+fn covered(entries: &[Entry], config: &Config, home: &Path) -> Vec<(PathBuf, Option<u64>)> {
+    let items = entries
+        .iter()
+        .filter_map(|e| Some((PathBuf::from(e.item.path.as_ref()?), e.item.size_bytes)));
+    let repos = config
+        .worktrees
+        .repos
+        .iter()
+        .map(|root| (sys::expand(root, home), None));
+    items.chain(repos).collect()
 }
 
 fn survey_target(t: &Target, home: &Path) -> Entry {
@@ -282,4 +293,29 @@ fn branch_delete(repo: &Path, branch: &str) -> String {
         exec::quote(&repo.to_string_lossy()),
         exec::quote(branch)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repos_folders_are_covered() {
+        let config = crate::config::parse(crate::config::DEFAULTS).unwrap();
+        let home = Path::new("/home/me");
+        let mut item = Item::new(Kind::Target, "uv cache");
+        item.path = Some("/home/me/.cache/uv".into());
+        item.size_bytes = Some(5);
+        let entries = [Entry {
+            item,
+            source: Source::None,
+        }];
+        assert_eq!(
+            covered(&entries, &config, home),
+            [
+                (PathBuf::from("/home/me/.cache/uv"), Some(5)),
+                (PathBuf::from("/home/me/workspace"), None),
+            ]
+        );
+    }
 }
