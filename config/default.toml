@@ -132,13 +132,6 @@ size   = "docker system df --format '{{if eq .Type \"Local Volumes\"}}{{.Size}}{
 why    = "database and app data"
 
 [[target]]
-name   = "Playwright browsers"
-needs  = []
-action = "keep"
-path   = "~/Library/Caches/ms-playwright"
-why    = "installed browsers that tests use"
-
-[[target]]
 name   = "mise tools"
 needs  = ["mise"]
 action = "keep"
