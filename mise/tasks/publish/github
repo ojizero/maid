@@ -15,28 +15,30 @@ if ! git tag --points-at HEAD | grep -qx "$tag"; then
   exit 1
 fi
 
-# Wait for the mirror to push the tag, then check that it is the same tag.
-want=$(git rev-parse "refs/tags/$tag")
+# Wait for the mirror to push the tag, then check that it is on the same
+# commit. Compare commits, not tag objects: actions/checkout fetches the
+# tag as a plain ref to the commit.
+want=$(git rev-parse HEAD)
 for _ in $(seq 40); do
-  got=$(gh api "repos/$repo/git/ref/tags/$tag" --jq .object.sha 2>/dev/null || true)
+  got=$(gh api "repos/$repo/commits/$tag" --jq .sha 2>/dev/null || true)
   [ -n "$got" ] && break
   sleep 15
 done
 if [ "$got" != "$want" ]; then
-  echo "publish:github: tag $tag on GitHub is '${got:-missing}', not $want." >&2
+  echo "publish:github: tag $tag on GitHub is at '${got:-missing}', not $want." >&2
   echo "Sync the push mirror on Forgejo, then run mise run publish:github." >&2
   exit 1
 fi
 
 # The repo has immutable releases: no file can change after publish.
-# A run again after a publish only checks that it has every file.
-want_files=$(cd dist && ls | sort)
-if got_files=$(gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name' 2>/dev/null); then
-  if [ "$(sort <<<"$got_files")" = "$want_files" ]; then
-    echo "publish:github: $tag is published already, with every file"
+# A run again after a publish only checks that it has the same files.
+if [ "$(gh release view "$tag" --repo "$repo" --json isDraft --jq .isDraft 2>/dev/null)" = "false" ]; then
+  if gh release download "$tag" --repo "$repo" --pattern SHA256SUMS --output - |
+    cmp -s - dist/SHA256SUMS; then
+    echo "publish:github: $tag is published already, with the same files"
     exit 0
   fi
-  echo "publish:github: $tag is published, but its files are not the files in dist/." >&2
+  echo "publish:github: $tag is published, but not with the files in dist/." >&2
   echo "A published release cannot change: release a new version." >&2
   exit 1
 fi

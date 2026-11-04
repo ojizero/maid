@@ -16,17 +16,42 @@ if ! git tag --points-at HEAD | grep -qx "$tag"; then
 fi
 
 auth=(-H "Authorization: token $FORGEJO_TOKEN")
+releases=$(curl -fsS "${auth[@]}" "$api/releases?limit=50" |
+  jq --arg tag "$tag" '[.[] | select(.tag_name == $tag)]')
 
+# A run again after a publish only checks that it has the same files.
+published=$(jq '[.[] | select(.draft | not)] | first' <<<"$releases")
+if [ "$published" != "null" ]; then
+  sums=$(jq -r '.assets[] | select(.name == "SHA256SUMS") | .browser_download_url' <<<"$published")
+  if [ -n "$sums" ] && curl -fsS "${auth[@]}" -L "$sums" | cmp -s - dist/SHA256SUMS; then
+    echo "publish:forgejo: $tag is published already, with the same files"
+    exit 0
+  fi
+  echo "publish:forgejo: $tag is published, but not with the files in dist/." >&2
+  echo "Delete that release on Forgejo, then run mise run publish:forgejo." >&2
+  exit 1
+fi
+
+# A draft that a stopped run left behind.
+for id in $(jq -r '.[].id' <<<"$releases"); do
+  curl -fsS "${auth[@]}" -X DELETE "$api/releases/$id"
+done
+
+# Add every file to a draft, then publish it, so the release is never
+# seen without all its files.
 release=$(
-  jq -n --arg tag "$tag" '{tag_name: $tag, name: $tag}' |
+  jq -n --arg tag "$tag" '{tag_name: $tag, name: $tag, draft: true}' |
     curl -fsS "${auth[@]}" -H "Content-Type: application/json" \
       --data @- "$api/releases"
 )
 id=$(jq -r .id <<<"$release")
-
 for file in dist/*; do
   curl -fsS "${auth[@]}" -o /dev/null \
     -F "attachment=@$file" "$api/releases/$id/assets?name=$(basename "$file")"
 done
+release=$(
+  curl -fsS "${auth[@]}" -X PATCH -H "Content-Type: application/json" \
+    --data '{"draft": false}' "$api/releases/$id"
+)
 
 echo "publish:forgejo: published $(jq -r .html_url <<<"$release")"
