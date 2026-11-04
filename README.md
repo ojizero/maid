@@ -182,7 +182,7 @@ mise run ci                # lint and test
 mise run fmt               # format the code
 mise run build             # release binary: target/release/maid
 mise run dist              # release archives for macOS and Linux in dist/
-mise run release           # ci and dist, then publish dist/ as a Forgejo release
+mise run release           # ci and dist, then publish dist/ on Forgejo and GitHub
 ```
 
 `mise tasks` lists them.
@@ -201,7 +201,12 @@ To release:
 1. Set `version` in `Cargo.toml`, then commit.
 2. Tag that commit `v<version>` and push the tag.
 
-`release` stops if HEAD does not have that tag. To run it locally, set `FORGEJO_TOKEN` to a token that can write to the repository.
+`release` runs two tasks, and each one stops if HEAD does not have that tag:
+
+- `publish:forgejo` makes the Forgejo release. It needs `FORGEJO_TOKEN`, a token that can write to the repository. The workflow uses the job token.
+- `publish:github` makes the same release on [GitHub](https://github.com/ojizero/maid), with the same files. The Forgejo push mirror copies the code and tags there, so the task waits up to 10 minutes for the tag, and checks that it is the same tag. It needs `GH_TOKEN`, a GitHub token that can write the contents of `ojizero/maid`. The workflow takes it from the `GH_RELEASE_TOKEN` secret.
+
+If one of them fails, fix the cause and run only that task again, for example `mise run publish:github`.
 
 `dist` cross-builds with `cargo zigbuild` for `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-unknown-linux-musl` and `x86_64-unknown-linux-musl`. mise can install a release. The forge requires sign-in, so set `MISE_FORGEJO_ENTERPRISE_TOKEN` to a token that can read the repository, then run:
 

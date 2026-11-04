@@ -20,7 +20,7 @@ runs:
       id: pins
       shell: bash
       run: |
-        hash=$({ cat mise.toml; grep -h '^#MISE tools=' mise/tasks/*; } | sha256sum)
+        hash=$({ cat mise.toml; grep -rh '^#MISE tools=' mise/tasks; } | sha256sum)
         echo "hash=${hash%% *}" >> "$GITHUB_OUTPUT"
 
     # Exact key only: a new tool version starts a clean cache, so old

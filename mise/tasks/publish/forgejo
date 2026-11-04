@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+#MISE description="Publish dist/ as the Forgejo release of the version tag at HEAD"
+#MISE depends=["ci", "dist"]
+#MISE tools={jq="1.8.2"}
+set -euo pipefail
+
+: "${FORGEJO_TOKEN:?set FORGEJO_TOKEN to a token that can write to the repository}"
+server="${GITHUB_SERVER_URL:-https://forge.ojizero.dev}"
+repo="${GITHUB_REPOSITORY:-ojizero/maid}"
+api="$server/api/v1/repos/$repo"
+
+tag="v$(cargo pkgid | sed 's/.*[#@]//')"
+if ! git tag --points-at HEAD | grep -qx "$tag"; then
+  echo "publish:forgejo: HEAD does not have the tag $tag of the Cargo.toml version" >&2
+  exit 1
+fi
+
+auth=(-H "Authorization: token $FORGEJO_TOKEN")
+
+release=$(
+  jq -n --arg tag "$tag" '{tag_name: $tag, name: $tag}' |
+    curl -fsS "${auth[@]}" -H "Content-Type: application/json" \
+      --data @- "$api/releases"
+)
+id=$(jq -r .id <<<"$release")
+
+for file in dist/*; do
+  curl -fsS "${auth[@]}" -o /dev/null \
+    -F "attachment=@$file" "$api/releases/$id/assets?name=$(basename "$file")"
+done
+
+echo "publish:forgejo: published $(jq -r .html_url <<<"$release")"

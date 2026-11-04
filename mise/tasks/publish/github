@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+#MISE description="Publish dist/ as the GitHub release of the version tag at HEAD"
+#MISE depends=["ci", "dist"]
+#MISE tools={gh="2.103.3"}
+set -euo pipefail
+
+# The Forgejo push mirror copies the code and tags to GitHub. This task
+# adds the release there, with the same files as the Forgejo release.
+repo="ojizero/maid"
+: "${GH_TOKEN:?set GH_TOKEN to a token that can write to the contents of $repo}"
+
+tag="v$(cargo pkgid | sed 's/.*[#@]//')"
+if ! git tag --points-at HEAD | grep -qx "$tag"; then
+  echo "publish:github: HEAD does not have the tag $tag of the Cargo.toml version" >&2
+  exit 1
+fi
+
+# Wait for the mirror to push the tag, then check that it is the same tag.
+want=$(git rev-parse "refs/tags/$tag")
+for _ in $(seq 40); do
+  got=$(gh api "repos/$repo/git/ref/tags/$tag" --jq .object.sha 2>/dev/null || true)
+  [ -n "$got" ] && break
+  sleep 15
+done
+if [ "$got" != "$want" ]; then
+  echo "publish:github: tag $tag on GitHub is '${got:-missing}', not $want." >&2
+  echo "Sync the push mirror on Forgejo, then run mise run publish:github." >&2
+  exit 1
+fi
+
+# The repo has immutable releases: no file can change after publish.
+# A run again after a publish only checks that it has every file.
+want_files=$(cd dist && ls | sort)
+if got_files=$(gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name' 2>/dev/null); then
+  if [ "$(sort <<<"$got_files")" = "$want_files" ]; then
+    echo "publish:github: $tag is published already, with every file"
+    exit 0
+  fi
+  echo "publish:github: $tag is published, but its files are not the files in dist/." >&2
+  echo "A published release cannot change: release a new version." >&2
+  exit 1
+fi
+
+# A draft that a stopped run left behind.
+for id in $(gh api "repos/$repo/releases" --paginate \
+  --jq ".[] | select(.draft and .tag_name == \"$tag\") | .id"); do
+  gh api -X DELETE "repos/$repo/releases/$id"
+done
+
+# gh makes a draft, adds the files, then publishes it. When a step
+# fails, gh deletes the draft.
+gh release create "$tag" dist/* --repo "$repo" --verify-tag --title "$tag" \
+  --notes "The same files as https://forge.ojizero.dev/$repo/releases/tag/$tag"
+echo "publish:github: published https://github.com/$repo/releases/tag/$tag"

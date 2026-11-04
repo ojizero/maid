@@ -19,3 +19,5 @@ jobs:
       - run: mise run release
         env:
           FORGEJO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A GitHub token that can write the contents of ojizero/maid.
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
