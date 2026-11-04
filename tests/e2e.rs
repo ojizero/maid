@@ -466,7 +466,7 @@ fn docker_targets_clean_only_when_docker_runs() {
         prunes,
         [
             "docker builder prune --all --force",
-            "docker image prune --all --force"
+            "docker image prune --all --force --filter until=720h"
         ]
     );
 }

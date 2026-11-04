@@ -106,7 +106,8 @@ name    = "Docker images"
 needs   = ["docker"]
 action  = "clean"
 size    = "docker system df --format '{{if eq .Type \"Images\"}}{{.Size}}{{end}}'"
-clean   = "docker image prune --all --force"
+# Unused images older than 30 days. until is the image's creation time.
+clean   = "docker image prune --all --force --filter until=720h"
 only_if = "docker info"
 
 [[target]]
