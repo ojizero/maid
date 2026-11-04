@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn quote_survives_the_shell() {
-        for value in ["plain", "it's", "a b", "$(rm -rf /)", "`x`", "\"q\"", ""] {
+        for value in ["plain", "it's", "a b", "$(touch x)", "`x`", "\"q\"", ""] {
             let out = sh(&format!("printf %s {}", quote(value))).unwrap();
             assert_eq!(out.stdout, value);
         }
@@ -147,7 +147,8 @@ mod tests {
     #[test]
     fn background_process_cannot_hold_output() {
         let start = Instant::now();
-        let out = sh("echo hi; sleep 30 &").unwrap();
+        // The sleep outlives the test, so keep it short.
+        let out = sh("echo hi; sleep 3 &").unwrap();
         assert!(out.status.success());
         assert_eq!(out.stdout, "hi\n");
         assert!(start.elapsed() < Duration::from_secs(2));

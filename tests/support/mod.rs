@@ -3,6 +3,9 @@
 //!
 //! Layout:
 //!   bin/            fake tools and a logging `wt` wrapper, first on PATH
+//!   sys/            links to the real programs in REAL, the rest of PATH
+//!   empty/          an empty folder: git templates, git hooks, XDG_CONFIG_DIRS
+//!   empty.toml      an empty file: the wt system, user and project config
 //!   home/           HOME
 //!   config/         XDG_CONFIG_HOME; holds the default config
 //!   state/          XDG_STATE_HOME (the run files)
@@ -16,7 +19,11 @@
 //!   docker-running  when it exists, the fake `docker` works
 //!   mid-run.json    the run file as the fake `uv cache clean` found it
 //!
-//! Set MAID_KEEP_SANDBOX=1 to keep the folder after the test.
+//! Set MAID_KEEP_SANDBOX (to any value) to keep the folder after the test.
+//!
+//! Host config can run code: git hooks and templates, and wt hooks in its
+//! system config. The environment and the files above stop git and wt from
+//! reading any config outside the sandbox.
 
 use std::ffi::OsStr;
 use std::fmt;
@@ -24,6 +31,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::Value;
@@ -36,8 +44,13 @@ const FAKES: &[&str] = &[
 /// The config that `maid init` writes.
 pub const DEFAULTS: &str = include_str!("../../config/default.toml");
 
-/// Real programs come only from these folders, after the fakes.
-const SYSTEM_PATH: &str = "/usr/bin:/bin";
+/// The only real programs on PATH: maid, git and the fakes use them. A
+/// program that is in neither bin/ nor sys/ is missing, so a test that
+/// deletes a fake cannot run the real tool (for example /usr/bin/docker).
+const REAL: &[&str] = &["basename", "cp", "du", "git", "grep", "rm", "sh"];
+
+/// Where the real programs are found.
+const SYSTEM_DIRS: &[&str] = &["/usr/bin", "/bin"];
 
 pub struct Sandbox {
     pub root: PathBuf,
@@ -90,19 +103,39 @@ impl Sandbox {
             home: root.join("home"),
             root,
         };
-        for dir in ["bin", "home", "config/maid", "state", "tmp"] {
+        for dir in ["bin", "sys", "empty", "home", "config/maid", "state", "tmp"] {
             fs::create_dir_all(sb.root.join(dir)).unwrap();
         }
+        fs::write(sb.root.join("empty.toml"), "").unwrap();
+        // No hooks, and no background maintenance that can outlive the test.
         fs::write(
             sb.root.join("gitconfig"),
-            "[user]\n\tname = maid test\n\temail = test@example.com\n\
-             [init]\n\tdefaultBranch = main\n",
+            format!(
+                "[user]\n\tname = maid test\n\temail = test@example.com\n\
+                 [init]\n\tdefaultBranch = main\n\
+                 [core]\n\thooksPath = {}\n\
+                 [maintenance]\n\tauto = false\n\
+                 [gc]\n\tauto = 0\n",
+                sb.root.join("empty").display()
+            ),
         )
         .unwrap();
+        sb.link_real_programs();
         sb.install_fakes();
         sb.make_caches();
         sb.write_config(DEFAULTS);
         sb
+    }
+
+    fn link_real_programs(&self) {
+        for name in REAL {
+            let real = SYSTEM_DIRS
+                .iter()
+                .map(|dir| Path::new(dir).join(name))
+                .find(|p| p.is_file())
+                .unwrap_or_else(|| panic!("{name} not found in {SYSTEM_DIRS:?}"));
+            std::os::unix::fs::symlink(real, self.root.join("sys").join(name)).unwrap();
+        }
     }
 
     fn install_fakes(&self) {
@@ -144,14 +177,12 @@ esac
         for name in FAKES {
             write_script(&self.root.join("bin").join(name), &fake);
         }
-        if let Some(wt) = real_wt() {
-            let wrapper = format!(
-                "#!/bin/sh\necho \"wt $*\" >> '{}/calls.log'\nexec '{}' \"$@\"\n",
-                self.root.display(),
-                wt.display()
-            );
-            write_script(&self.root.join("bin/wt"), &wrapper);
-        }
+        let wrapper = format!(
+            "#!/bin/sh\necho \"wt $*\" >> '{}/calls.log'\nexec '{}' \"$@\"\n",
+            self.root.display(),
+            real_wt().display()
+        );
+        write_script(&self.root.join("bin/wt"), &wrapper);
     }
 
     /// Three caches with files, so the fakes have something to empty.
@@ -166,13 +197,28 @@ esac
         }
     }
 
-    /// A command with the sandbox environment and nothing else.
+    /// A command with the sandbox environment and nothing else. It runs in
+    /// the sandbox, so a relative path cannot reach the maid checkout, and
+    /// git does not look for a repo above the sandbox.
     pub fn command(&self, program: impl AsRef<OsStr>) -> Command {
+        let path = std::env::join_paths([self.root.join("bin"), self.root.join("sys")])
+            .expect("the sandbox path has no ':'");
+        let empty = self.root.join("empty");
+        let empty_toml = self.root.join("empty.toml");
         let mut cmd = Command::new(program);
         cmd.env_clear()
+            .current_dir(&self.root)
+            .env("PATH", path)
+            .env("XDG_CONFIG_DIRS", &empty)
+            .env("GIT_CEILING_DIRECTORIES", self.root.parent().unwrap())
+            .env("GIT_TEMPLATE_DIR", &empty)
+            .env("GIT_ATTR_NOSYSTEM", "1")
+            .env("WORKTRUNK_SYSTEM_CONFIG_PATH", &empty_toml)
+            .env("WORKTRUNK_CONFIG_PATH", &empty_toml)
+            .env("WORKTRUNK_PROJECT_CONFIG_PATH", &empty_toml)
             .env(
-                "PATH",
-                format!("{}:{SYSTEM_PATH}", self.root.join("bin").display()),
+                "WORKTRUNK_APPROVALS_PATH",
+                self.root.join("state/wt-approvals.toml"),
             )
             .env("HOME", &self.home)
             .env("XDG_CONFIG_HOME", self.root.join("config"))
@@ -185,15 +231,14 @@ esac
         cmd
     }
 
-    /// Run maid in the sandbox. Panics when HOME is not inside the temp folder.
+    /// Run maid in the sandbox. Panics when HOME is not inside the sandbox.
     pub fn maid(&self, args: &[&str]) -> MaidOutput {
-        let tmp = fs::canonicalize(std::env::temp_dir()).unwrap();
         let home = fs::canonicalize(&self.home).unwrap();
         assert!(
-            home.starts_with(&tmp) && home != tmp,
+            home.starts_with(&self.root) && home != self.root,
             "refusing to run maid: HOME {} is not inside {}",
             home.display(),
-            tmp.display()
+            self.root.display()
         );
         let out = self
             .command(env!("CARGO_BIN_EXE_maid"))
@@ -205,16 +250,6 @@ esac
             stdout: String::from_utf8(out.stdout).unwrap(),
             stderr: String::from_utf8(out.stderr).unwrap(),
         }
-    }
-
-    /// True when the real wt is installed. Tests that need it return early
-    /// when it is not.
-    pub fn has_wt(&self) -> bool {
-        let found = self.root.join("bin/wt").exists();
-        if !found {
-            eprintln!("SKIPPED: wt not found (set MAID_TEST_WT to its path)");
-        }
-        found
     }
 
     /// Run git in `dir` and panic when it fails.
@@ -474,19 +509,25 @@ fn walk(dir: &Path, f: &mut impl FnMut(&Path)) {
     }
 }
 
-/// The real wt: $MAID_TEST_WT, else the first `wt` on PATH that is not a
-/// mise shim (a shim may not work with the sandbox HOME), else `mise which wt`.
-fn real_wt() -> Option<PathBuf> {
-    if let Some(wt) = std::env::var_os("MAID_TEST_WT") {
-        return Some(PathBuf::from(wt));
-    }
-    let on_path = std::env::split_paths(&std::env::var_os("PATH")?)
-        .filter(|dir| !dir.to_string_lossy().contains("mise/shims"))
-        .map(|dir| dir.join("wt"))
-        .find(|wt| wt.is_file());
-    on_path.or_else(|| {
-        let out = Command::new("mise").args(["which", "wt"]).output().ok()?;
-        let wt = String::from_utf8(out.stdout).ok()?;
-        out.status.success().then(|| PathBuf::from(wt.trim()))
+/// The real wt, as an absolute path: $MAID_TEST_WT, else the first `wt`
+/// on PATH that is not a mise shim. `mise run test` puts the wt that
+/// mise.toml pins on PATH. Found once, without running any program.
+fn real_wt() -> &'static Path {
+    static WT: OnceLock<PathBuf> = OnceLock::new();
+    WT.get_or_init(|| {
+        let wt = match std::env::var_os("MAID_TEST_WT") {
+            Some(wt) => PathBuf::from(wt),
+            None => std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .filter(|dir| !dir.to_string_lossy().contains("mise/shims"))
+                .map(|dir| dir.join("wt"))
+                .find(|wt| wt.is_file())
+                .expect(
+                    "wt not found on PATH: run the tests with `mise run test`, or set MAID_TEST_WT",
+                ),
+        };
+        let wt =
+            fs::canonicalize(&wt).unwrap_or_else(|e| panic!("MAID_TEST_WT {}: {e}", wt.display()));
+        assert!(wt.is_file(), "{} is not a file", wt.display());
+        wt
     })
 }

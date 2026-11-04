@@ -211,6 +211,6 @@ mise use 'forgejo:ojizero/maid[api_url=https://forge.ojizero.dev/api/v1]'
 
 Each command is a module with a `run` function: `init.rs`, `doctor.rs`, `survey.rs`, `cleanup.rs` and `report.rs`. A command with flags defines its own clap `Args` there. `app.rs` holds what all commands share: the home folder, the output format, the config, and saving and printing the run files (`record.rs`). To add a command, add its module and one arm in `main.rs`.
 
-The end-to-end tests run the real binary in a sandbox folder, with fake tools first on `PATH` and real `git` and `wt`. They set `MAID_TEST_VOLUME` to measure free space on the sandbox folder. Only tests use this variable.
+The end-to-end tests run the real binary in a sandbox folder, with real `git` and `wt` and fake package tools. Each command gets a clear environment, runs in the sandbox, and has a `PATH` of only the fakes and links to a few real programs (`sh`, `git`, `du`, `rm`, `cp`, `grep`, `basename`). So a test can never run a real `docker` or `brew`. Git and `wt` read no config, templates or hooks from the host. The tests need `wt`: `mise run test` uses the version that `mise.toml` pins, or set `MAID_TEST_WT` to its path. They set `MAID_TEST_VOLUME` to measure free space on the sandbox folder. Only tests use this variable.
 
 macOS is the main platform, and maid also runs on Linux. The Xcode targets are for macOS only: `init` leaves them out where `xcrun` is missing.

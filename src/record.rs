@@ -235,10 +235,22 @@ pub fn load(path: &Path) -> Result<Record> {
 mod tests {
     use super::*;
 
+    /// A new folder that is removed when the test ends, also on a panic.
+    struct Scratch(PathBuf);
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
     #[test]
     fn prune_keeps_the_newest_runs() {
         let dir = std::env::temp_dir().join(format!("maid-prune-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        // create_dir, not create_dir_all: it fails on a folder or symlink
+        // that is there already, so the test deletes only its own files.
+        std::fs::create_dir(&dir).unwrap();
+        let _scratch = Scratch(dir.clone());
         let names: Vec<String> = (0..10)
             .map(|n| format!("2026-11-0{n}T000000.0Z.json"))
             .collect();
@@ -252,7 +264,6 @@ mod tests {
         assert_eq!(left, expected);
         assert_eq!(latest(&dir).unwrap(), dir.join(&names[9]));
         assert!(dir.join(".run.json.1").exists());
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

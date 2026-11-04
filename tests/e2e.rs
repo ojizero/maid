@@ -37,9 +37,6 @@ fn survey_calls() -> Vec<String> {
 #[test]
 fn cleanup_removes_only_what_is_safe() {
     let sb = Sandbox::new("cleanup");
-    if !sb.has_wt() {
-        return;
-    }
     let repo = sb.make_repo();
     let main = path(&repo.main);
 
@@ -179,9 +176,6 @@ fn cleanup_removes_only_what_is_safe() {
 #[test]
 fn dry_run_changes_nothing() {
     let sb = Sandbox::new("dry-run");
-    if !sb.has_wt() {
-        return;
-    }
     let repo = sb.make_repo();
     let before = sb.snapshot();
 
@@ -207,9 +201,6 @@ fn dry_run_changes_nothing() {
 #[test]
 fn survey_writes_the_run_file_and_report_prints_it() {
     let sb = Sandbox::new("survey");
-    if !sb.has_wt() {
-        return;
-    }
     let repo = sb.make_repo();
     let before = sb.snapshot();
 
@@ -249,9 +240,6 @@ fn survey_writes_the_run_file_and_report_prints_it() {
 #[test]
 fn worktree_at_main_is_cleaned() {
     let sb = Sandbox::new("empty");
-    if !sb.has_wt() {
-        return;
-    }
     let repo = sb.make_repo();
     let fresh = repo.main.with_file_name("proj.fresh");
     sb.git(
@@ -270,9 +258,6 @@ fn worktree_at_main_is_cleaned() {
 #[test]
 fn only_cleans_the_named_target() {
     let sb = Sandbox::new("only");
-    if !sb.has_wt() {
-        return;
-    }
     let repo = sb.make_repo();
 
     let out = sb.maid(&["cleanup", "--only", "uv cache", "--format", "json"]);
@@ -510,7 +495,7 @@ fn docker_targets_clean_only_when_docker_runs() {
 fn missing_wt_skips_the_repo() {
     let sb = Sandbox::new("no-wt");
     let repo = sb.make_repo();
-    let _ = fs::remove_file(sb.root.join("bin/wt"));
+    fs::remove_file(sb.root.join("bin/wt")).unwrap();
 
     let out = sb.maid(&["survey", "--format", "json"]);
     assert_eq!(out.code, 0, "{out}");
@@ -568,9 +553,6 @@ fn missing_config_flag_file_is_a_usage_error() {
 #[test]
 fn only_worktree_removes_only_default_worktrees() {
     let sb = Sandbox::new("only-worktree");
-    if !sb.has_wt() {
-        return;
-    }
     let repo = sb.make_repo();
 
     let out = sb.maid(&["cleanup", "--only", "worktree", "--format", "json"]);
@@ -779,6 +761,32 @@ fn doctor_json_has_the_checks_and_the_last_run() {
     assert_eq!(last["failed"], 0);
     assert!(last["freed_bytes"].as_u64().unwrap() > 0, "{last}");
     assert!(last["file"].as_str().unwrap().ends_with(".json"));
+}
+
+/// A deleted fake is missing: PATH has no system folder, so the real tool
+/// (for example /usr/bin/docker) cannot run in its place.
+#[test]
+fn deleted_fake_does_not_fall_back_to_the_real_tool() {
+    let sb = Sandbox::new("no-real-docker");
+    fs::remove_file(sb.root.join("bin/docker")).unwrap();
+
+    let found = sb
+        .command("sh")
+        .args(["-c", "command -v docker"])
+        .output()
+        .unwrap();
+    assert!(!found.status.success(), "{found:?}");
+
+    // A dry run, so that even a broken PATH cannot prune real images.
+    let out = sb.maid(&["cleanup", "--dry-run", "--format", "json"]);
+    assert_eq!(out.code, 0, "{out}");
+    let run = out.json();
+    for name in ["Docker images", "Docker build cache"] {
+        let item = item_named(&run, name);
+        assert_eq!(item["result"], "skipped", "{item}");
+        assert_eq!(item["reason"], "only_if failed: docker info", "{item}");
+        assert_eq!(item["missing_programs"], json!(["docker"]), "{item}");
+    }
 }
 
 #[test]
