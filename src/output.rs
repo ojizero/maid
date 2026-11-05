@@ -1,4 +1,4 @@
-//! Render a run file as text or JSON.
+//! Render a run file as text, JSON or HTML.
 
 use std::fmt::{self, Write};
 use std::path::Path;
@@ -18,7 +18,7 @@ pub fn render(record: &Record, format: Format, home: &Path) -> String {
     match format {
         Format::Text => text(record, home, sys::color()),
         Format::Json => json(record),
-        Format::Html => unreachable!("App::new rejects html"),
+        Format::Html => crate::report_html::render(record),
     }
 }
 

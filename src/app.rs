@@ -22,9 +22,6 @@ pub struct App {
 
 impl App {
     pub fn new(config: Option<PathBuf>, format: Format) -> Result<App> {
-        if let Format::Html = format {
-            return usage(Err(anyhow::anyhow!("html output is not implemented yet")));
-        }
         let home = sys::home()?;
         Ok(App {
             run_file: record::new_path(&record::dir(&home)),

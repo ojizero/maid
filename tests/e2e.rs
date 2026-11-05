@@ -586,15 +586,103 @@ fn unknown_only_name_is_a_usage_error() {
 #[test]
 fn report_errors() {
     let sb = Sandbox::new("report");
-    for command in ["survey", "cleanup", "report"] {
+    for command in ["init", "doctor", "survey", "cleanup"] {
         assert_fails(
             &sb.maid(&[command, "--format", "html"]),
             2,
-            "html output is not implemented yet",
+            "html output is available only for `maid report`",
         );
     }
     assert!(sb.calls().is_empty());
     assert_fails(&sb.maid(&["report"]), 1, "run `maid survey` first");
+    assert_fails(
+        &sb.maid(&["report", "--format", "html"]),
+        1,
+        "run `maid survey` first",
+    );
+}
+
+#[test]
+fn html_report_reads_the_saved_run_without_commands() {
+    let sb = Sandbox::new("report-html");
+    assert_eq!(sb.maid(&["survey"]).code, 0);
+    let before = sb.calls();
+    let files = sb.run_files();
+    for args in [
+        vec!["report", "--format", "html"],
+        vec!["--format", "html", "report"],
+    ] {
+        let out = sb.maid(&args);
+        assert_eq!(out.code, 0, "{out}");
+        assert!(out.stdout.starts_with("<!doctype html>"), "{out}");
+        assert!(out.stdout.contains("Homebrew cache"), "{out}");
+        assert!(out.stdout.contains("maid survey"), "{out}");
+    }
+    assert_eq!(sb.calls(), before);
+    assert_eq!(sb.run_files(), files);
+}
+
+#[test]
+fn report_selects_runs_and_reuses_only_their_own_html() {
+    let sb = Sandbox::new("report-runs");
+    let survey = sb.maid(&["survey", "-f", "json"]).json();
+    let cleanup = sb.maid(&["cleanup", "--dry-run", "-f", "json"]).json();
+    let files = sb.run_files();
+    let id = files[0].file_stem().unwrap().to_str().unwrap();
+    let filename = files[0].file_name().unwrap().to_str().unwrap();
+    let calls = sb.calls();
+
+    for selected in [id, filename] {
+        assert_eq!(
+            sb.maid(&["report", "--run", selected, "-f", "json"]).json(),
+            survey
+        );
+    }
+    assert_eq!(sb.maid(&["report", "-f", "json"]).json(), cleanup);
+    let old = sb.maid(&["report", "--run", id, "-f", "html"]);
+    assert_eq!(old.code, 0, "{old}");
+    let old_html = files[0].with_extension("html");
+    assert_eq!(fs::read_to_string(&old_html).unwrap(), old.stdout);
+    assert_eq!(
+        fs::metadata(&old_html).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert!(old.stderr.contains("saved"), "{old}");
+    fs::write(&old_html, "cached survey").unwrap();
+    let reused = sb.maid(&["report", "--run", id, "-f", "html"]);
+    assert_eq!(reused.stdout, "cached survey");
+    assert!(reused.stderr.contains("using"), "{reused}");
+
+    let latest = sb.maid(&["report", "-f", "html"]);
+    assert_eq!(latest.code, 0, "{latest}");
+    assert!(latest.stdout.contains("maid cleanup --dry-run"), "{latest}");
+    assert_eq!(fs::read_to_string(&old_html).unwrap(), "cached survey");
+    let forced = sb.maid(&["report", "--run", id, "-f", "html", "--force"]);
+    assert_eq!(forced.code, 0, "{forced}");
+    assert_eq!(forced.stdout, old.stdout);
+    assert_eq!(
+        fs::read_to_string(files[1].with_extension("html")).unwrap(),
+        latest.stdout
+    );
+    assert_eq!(sb.calls(), calls);
+    assert_eq!(sb.run_files(), files);
+}
+
+#[test]
+fn report_rejects_missing_runs_and_force_without_html() {
+    let sb = Sandbox::new("report-flags");
+    assert_eq!(sb.maid(&["survey"]).code, 0);
+    for id in ["missing", "../outside", "/tmp/outside.json"] {
+        assert_fails(&sb.maid(&["report", "--run", id]), 1, "no run");
+    }
+    for format in ["text", "json"] {
+        assert_fails(
+            &sb.maid(&["report", "-f", format, "--force"]),
+            2,
+            "--force requires --format html",
+        );
+    }
+    assert!(!sb.run_files()[0].with_extension("html").exists());
 }
 
 #[test]

@@ -1,8 +1,8 @@
 //! Facts about the host: paths, free space, time, terminal.
 
 use std::ffi::CString;
-use std::io::IsTerminal;
-use std::os::unix::fs::PermissionsExt;
+use std::io::{IsTerminal, Write};
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -44,6 +44,33 @@ pub fn xdg(var: &str, fallback: &str, home: &Path) -> PathBuf {
         Some(dir) if Path::new(&dir).is_absolute() => PathBuf::from(dir),
         _ => home.join(fallback),
     }
+}
+
+/// Write a private file through a temporary file in the same folder.
+pub fn write_atomic(path: &Path, contents: &[u8]) -> Result<()> {
+    let dir = path.parent().context("file has no folder")?;
+    let name = path
+        .file_name()
+        .context("file has no name")?
+        .to_string_lossy();
+    let tmp = dir.join(format!(".{name}.{}", std::process::id()));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&tmp)
+        .with_context(|| format!("cannot create {}", tmp.display()))?;
+    let mut write = || -> Result<()> {
+        file.write_all(contents)?;
+        file.sync_all()?;
+        std::fs::rename(&tmp, path)?;
+        Ok(())
+    };
+    write()
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&tmp);
+        })
+        .with_context(|| format!("cannot write {}", path.display()))
 }
 
 /// The first executable file with this name in a PATH folder.

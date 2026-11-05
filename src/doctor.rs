@@ -20,7 +20,7 @@ pub fn run(app: &App) -> Result<ExitCode> {
     match app.format {
         Format::Text => print!("{}", health.text()),
         Format::Json => println!("{}", serde_json::to_string_pretty(&health)?),
-        Format::Html => unreachable!("App::new rejects html"),
+        Format::Html => unreachable!("only report accepts html"),
     }
     Ok(if health.ok {
         ExitCode::SUCCESS

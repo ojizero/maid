@@ -10,6 +10,7 @@ mod output;
 mod par;
 mod record;
 mod report;
+mod report_html;
 mod size;
 mod survey;
 mod sys;
@@ -33,7 +34,7 @@ struct Cli {
     #[arg(short, long, global = true, value_name = "PATH")]
     config: Option<PathBuf>,
 
-    /// Output format (html is not implemented yet)
+    /// Output format (html is available only for report)
     #[arg(short, long, global = true, value_enum, default_value_t = Format::Text)]
     format: Format,
 
@@ -51,8 +52,8 @@ enum Command {
     Survey,
     /// Survey, then run the clean command of each item with decision "clean".
     Cleanup(cleanup::Args),
-    /// Print the newest run.
-    Report,
+    /// Print a saved run (the newest by default).
+    Report(report::Args),
 }
 
 fn main() -> ExitCode {
@@ -67,12 +68,17 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> Result<ExitCode> {
+    if matches!(cli.format, Format::Html) && !matches!(cli.command, Command::Report(_)) {
+        return app::usage(Err(anyhow::anyhow!(
+            "html output is available only for `maid report`"
+        )));
+    }
     let app = App::new(cli.config, cli.format)?;
     match cli.command {
         Command::Init => init::run(&app),
         Command::Doctor => doctor::run(&app),
         Command::Survey => survey::run(&app),
         Command::Cleanup(args) => cleanup::run(&app, &args),
-        Command::Report => report::run(&app),
+        Command::Report(args) => report::run(&app, &args),
     }
 }

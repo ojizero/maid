@@ -13,12 +13,40 @@
 ```
 maid [-c|--config PATH] init
 maid [-c|--config PATH] [-f|--format text|json] doctor
-maid [-c|--config PATH] [-f|--format text|json|html] survey
-maid [-c|--config PATH] [-f|--format text|json|html] cleanup [-n|--dry-run] [--only NAME]...
-maid [-f|--format text|json|html] report
+maid [-c|--config PATH] [-f|--format text|json] survey
+maid [-c|--config PATH] [-f|--format text|json] cleanup [-n|--dry-run] [--only NAME]...
+maid [-f|--format text|json|html] report [--run ID] [--force]
 ```
 
-`-c` and `-f` can also come after the command. The `html` format is not implemented yet: it fails with exit code 2 before maid does any work.
+`-c` and `-f` can also come after the command. Only `report` accepts `html`.
+Other commands reject it with exit code 2 before they do any work.
+To save a report that opens offline in a browser:
+
+```sh
+maid report --format html > report.html
+```
+
+The report uses the newest saved run by default. Use `--run ID` to select
+a retained run by its file name, with or without `.json`:
+
+```sh
+maid report --run 2026-11-03T090040.123456789Z --format html
+```
+
+HTML is saved beside the run JSON as `<ID>.html`, with mode 0600. Later
+requests reuse that file. Use `--force --format html` to replace it, for
+example after an update to the report layout. `--force` requires HTML.
+The saved report path goes to stderr; HTML still goes to stdout.
+Maid removes cached HTML when it updates or deletes that run's JSON file.
+
+The report does not scan or clean again.
+It shows recorded decisions and command results, not a check of the files
+that remain. Item sizes can overlap. Their sum is not a disk usage total.
+The pie charts show sizes by target and by cleanup result. Target slices
+show space freed out of measured size. The result chart includes clean
+candidates that were skipped, failed, or still planned. Unknown sizes are
+not included. Hover over, focus, or tap a slice for a tooltip. Press Escape
+to close it. The color legend entries also contain the slice details.
 
 - `init` writes a config file with the known targets that this computer can use: each target in [`config/default.toml`](config/default.toml) whose `needs` programs are all on PATH. It lists the targets it left out. It does not replace a file that exists.
 - `doctor` checks that maid can run, and that every target in the config is usable. It prints one line for each check: `ok`, `warn` or `FAIL`. It exits with code 1 when a check fails. See [Doctor](#doctor).
@@ -26,7 +54,8 @@ maid [-f|--format text|json|html] report
 - `cleanup` runs a fresh survey, then runs the clean command of each item with decision `clean`, one at a time. Just before each item it checks `skip_if_running`, `only_if` and the worktree checks again. When an item fails, maid records the error and continues. A target whose path is a symlink is skipped. If `pgrep` cannot check a program, the target is skipped.
   - `-n`, `--dry-run`: print each planned command with the current size, and run the item's `dry_run` command if it has one. Changes nothing. A `dry_run` command that fails marks the item `failed` (exit code 1).
   - `--only NAME`: clean only the target or worktree rule with this name. `worktree` selects the worktrees that no override matches. You can give it more than once.
-- `report` prints the newest run file.
+- `report` prints a saved run (the newest by default). `--run ID` also works
+  with text and JSON. HTML reports are saved and reused; `--force` rebuilds them.
 
 Results go to stdout. Progress and warnings go to stderr. The text output has no color when stdout is not a terminal or `NO_COLOR` is set.
 
@@ -126,7 +155,7 @@ The `last run` line sums up the newest run: items done, space freed, items faile
 
 ## Run files
 
-Each run writes a new file to `$XDG_STATE_HOME/maid/runs/`, else `~/.local/state/maid/runs/`. The file name is the UTC time to the nanosecond, for example `2026-11-03T090040.123456789Z.json`. maid writes a temp file and renames it, with mode 0600. maid keeps the newest 7 run files and deletes the older ones.
+Each run writes a new file to `$XDG_STATE_HOME/maid/runs/`, else `~/.local/state/maid/runs/`. The file name is the UTC time to the nanosecond, for example `2026-11-03T090040.123456789Z.json`. maid writes a temp file and renames it, with mode 0600. maid keeps the newest 7 run files and deletes the older ones, with their saved HTML reports.
 
 maid writes the run file while the run goes on: after the survey, then again after each item that `cleanup` cleans or dry-runs. So a run that was stopped still shows how far it got. `report` and `doctor` say when the newest run did not finish.
 

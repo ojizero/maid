@@ -1,6 +1,5 @@
 //! The run file: what a survey or cleanup found and did.
 
-use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
@@ -165,34 +164,50 @@ pub fn new_path(dir: &Path) -> PathBuf {
     dir.join(format!("{}.json", sys::stamp()))
 }
 
+/// Serialize run writes, pruning and report generation in this state folder.
+/// The returned file holds the lock until it is dropped.
+pub fn lock(dir: &Path) -> Result<std::fs::File> {
+    std::fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(dir.join(".lock"))
+        .with_context(|| format!("cannot open state lock in {}", dir.display()))?;
+    file.lock()
+        .with_context(|| format!("cannot lock {}", dir.display()))?;
+    Ok(file)
+}
+
 /// Write the run file: a temp file next to it, then rename.
 pub fn save(record: &Record, path: &Path) -> Result<()> {
     let dir = path.parent().context("run file has no folder")?;
-    std::fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
-    let tmp = dir.join(format!(".run.json.{}", std::process::id()));
-    let write = || -> Result<()> {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&tmp)?;
-        file.write_all(serde_json::to_string_pretty(record)?.as_bytes())?;
-        file.write_all(b"\n")?;
-        file.sync_all()?;
-        std::fs::rename(&tmp, path)?;
-        Ok(())
-    };
-    write()
-        .inspect_err(|_| {
-            let _ = std::fs::remove_file(&tmp);
-        })
-        .with_context(|| format!("cannot write {}", path.display()))
+    let _lock = lock(dir)?;
+    remove_html(path)?;
+    sys::write_atomic(
+        path,
+        (serde_json::to_string_pretty(record)? + "\n").as_bytes(),
+    )
+}
+
+/// Remove the cached report when its run changes or expires.
+fn remove_html(path: &Path) -> Result<()> {
+    let html = path.with_extension("html");
+    match std::fs::remove_file(&html) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e).with_context(|| format!("cannot delete {}", html.display())),
+    }
 }
 
 /// Delete all run files but the newest `KEEP`.
 pub fn prune(dir: &Path) -> Result<()> {
+    let _lock = lock(dir)?;
     let runs = runs(dir)?;
     for path in &runs[..runs.len().saturating_sub(KEEP)] {
+        remove_html(path)?;
         std::fs::remove_file(path).with_context(|| format!("cannot delete {}", path.display()))?;
     }
     Ok(())
@@ -203,6 +218,17 @@ pub fn latest(dir: &Path) -> Result<PathBuf> {
     runs(dir)?
         .pop()
         .with_context(|| format!("no run in {} (run `maid survey` first)", dir.display()))
+}
+
+/// Find a retained run by its file name, with or without the .json suffix.
+pub fn find(dir: &Path, id: &str) -> Result<PathBuf> {
+    runs(dir)?
+        .into_iter()
+        .find(|path| {
+            path.file_stem().is_some_and(|name| name == id)
+                || path.file_name().is_some_and(|name| name == id)
+        })
+        .with_context(|| format!("no run {id:?} in {}", dir.display()))
 }
 
 /// The run files in `dir`, oldest first. Their names sort in time order.
@@ -257,6 +283,9 @@ mod tests {
         for name in names.iter().chain([&".run.json.1".to_string()]) {
             std::fs::write(dir.join(name), "{}").unwrap();
         }
+        for name in &names {
+            std::fs::write(dir.join(name).with_extension("html"), "cached").unwrap();
+        }
 
         prune(&dir).unwrap();
         let left = runs(&dir).unwrap();
@@ -264,6 +293,76 @@ mod tests {
         assert_eq!(left, expected);
         assert_eq!(latest(&dir).unwrap(), dir.join(&names[9]));
         assert!(dir.join(".run.json.1").exists());
+        for (index, name) in names.iter().enumerate() {
+            assert_eq!(dir.join(name).with_extension("html").exists(), index >= 3);
+        }
+    }
+
+    #[test]
+    fn progress_save_waits_for_report_generation() {
+        let dir = std::env::temp_dir().join(format!("maid-lock-{}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let _scratch = Scratch(dir.clone());
+        let record = Record {
+            version: 2,
+            host: "new progress".into(),
+            kind: RunKind::Cleanup,
+            steps: vec![RunKind::Survey],
+            started_at: "now".into(),
+            finished_at: None,
+            free_bytes_before: None,
+            free_bytes_after: None,
+            items: vec![],
+            warnings: vec![],
+        };
+        let path = dir.join("run.json");
+        let report_lock = lock(&dir).unwrap();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let worker_path = path.clone();
+        let worker = std::thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            done_tx.send(save(&record, &worker_path)).unwrap();
+        });
+        ready_rx.recv().unwrap();
+        assert!(matches!(
+            done_rx.recv_timeout(std::time::Duration::from_millis(50)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ));
+        std::fs::write(path.with_extension("html"), "old report").unwrap();
+        drop(report_lock);
+        done_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        worker.join().unwrap();
+        assert_eq!(load(&path).unwrap().host, "new progress");
+        assert!(!path.with_extension("html").exists());
+    }
+
+    #[test]
+    fn saving_progress_removes_the_cached_html() {
+        let dir = std::env::temp_dir().join(format!("maid-progress-{}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let _scratch = Scratch(dir.clone());
+        let path = dir.join("run.json");
+        let record = Record {
+            version: 2,
+            host: "test".into(),
+            kind: RunKind::Cleanup,
+            steps: vec![RunKind::Survey],
+            started_at: "now".into(),
+            finished_at: None,
+            free_bytes_before: None,
+            free_bytes_after: None,
+            items: vec![],
+            warnings: vec![],
+        };
+        save(&record, &path).unwrap();
+        std::fs::write(path.with_extension("html"), "old progress").unwrap();
+        save(&record, &path).unwrap();
+        assert!(!path.with_extension("html").exists());
+        assert!(load(&path).unwrap().finished_at.is_none());
     }
 
     #[test]

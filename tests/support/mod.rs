@@ -407,6 +407,7 @@ esac
         let mut files: Vec<PathBuf> = fs::read_dir(dir)
             .unwrap()
             .map(|e| e.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
             .collect();
         files.sort();
         files
